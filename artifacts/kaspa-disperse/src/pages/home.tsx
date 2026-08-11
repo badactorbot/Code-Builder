@@ -228,14 +228,15 @@ export default function Home() {
       try {
         const provider = account.provider;
 
+        // KasWare / Kastle expect { address, amount } where amount is in sompi
         const sendOutputs = batch.map((r) => ({
-          toAddr: r.address,
+          address: r.address,
           amount: Math.round(r.amount * 1e8),
         }));
 
         if (PLATFORM_FEE_KAS > 0) {
           sendOutputs.push({
-            toAddr: TREASURY_ADDRESS,
+            address: TREASURY_ADDRESS,
             amount: Math.round(PLATFORM_FEE_KAS * 1e8),
           });
         }
@@ -243,13 +244,23 @@ export default function Home() {
         let txId = '';
 
         if (provider && typeof provider.sendKaspa === 'function') {
-          txId = await provider.sendKaspa(sendOutputs);
+          // Try multi-send first (KasWare/Kastle array format)
+          // Fall back to sequential single sends if the wallet rejects the array
+          try {
+            txId = await provider.sendKaspa(sendOutputs);
+          } catch {
+            // Single-send fallback: iterate recipients one by one
+            for (const recipient of batch) {
+              txId = await provider.sendKaspa(
+                recipient.address,
+                Math.round(recipient.amount * 1e8),
+              );
+            }
+          }
         } else if (provider && typeof provider.sendTransaction === 'function') {
           txId = await provider.sendTransaction({ outputs: sendOutputs });
         } else {
-          for (const recipient of batch) {
-            txId = await provider.sendKaspa(recipient.address, Math.round(recipient.amount * 1e8));
-          }
+          throw new Error('Connected wallet does not expose a recognized send method.');
         }
 
         setBatchStatuses((prev) => {
