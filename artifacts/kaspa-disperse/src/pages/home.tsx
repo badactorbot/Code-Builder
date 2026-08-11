@@ -72,6 +72,10 @@ interface BatchStatus {
   status: 'pending' | 'signing' | 'sent' | 'failed';
   txId: string;
   error?: string;
+  /** e.g. "2 of 5" — set during per-output single-send fallback */
+  signingProgress?: string;
+  /** how many individual txids were sent (single-send fallback) */
+  sentCount?: number;
 }
 
 interface WalletAccount {
@@ -225,55 +229,105 @@ export default function Home() {
         return copy;
       });
 
-      try {
-        const provider = account.provider;
+      const provider = account.provider;
 
-        // Build outputs: KasWare uses { address, sompi }, Kastle may use { address, amount }.
-        // We try the KasWare format first (sompi), then the amount fallback.
-        const sompiOutputs = batch.map((r) => ({
-          address: r.address,
-          sompi: Math.round(r.amount * 1e8),
-        }));
-        const amountOutputs = batch.map((r) => ({
-          address: r.address,
-          amount: Math.round(r.amount * 1e8),
-        }));
+      // Build the multi-output payload. KasWare uses { address, sompi }.
+      const multiOutputs = batch.map((r) => ({
+        address: r.address,
+        sompi: Math.round(r.amount * 1e8),
+      }));
+      if (PLATFORM_FEE_KAS > 0) {
+        multiOutputs.push({ address: TREASURY_ADDRESS, sompi: Math.round(PLATFORM_FEE_KAS * 1e8) });
+      }
 
-        if (PLATFORM_FEE_KAS > 0) {
-          sompiOutputs.push({ address: TREASURY_ADDRESS, sompi: Math.round(PLATFORM_FEE_KAS * 1e8) });
-          amountOutputs.push({ address: TREASURY_ADDRESS, amount: Math.round(PLATFORM_FEE_KAS * 1e8) });
+      // --- Attempt 1: multi-output array (one tx, one signature) ---
+      let usedMultiOutput = false;
+      let multiTxId = '';
+
+      if (provider && typeof provider.sendKaspa === 'function') {
+        try {
+          const result = await provider.sendKaspa(multiOutputs);
+          multiTxId = typeof result === 'string' ? result : result?.txId ?? 'SUCCESS';
+          usedMultiOutput = true;
+        } catch {
+          // Wallet rejected array format — fall through to per-output loop
         }
-
-        let txId = '';
-
-        if (provider && typeof provider.sendKaspa === 'function') {
-          // Attempt 1: KasWare-style { address, sompi } array → one tx, one signature
-          try {
-            txId = await provider.sendKaspa(sompiOutputs);
-          } catch {
-            // Attempt 2: alternate { address, amount } array format (some wallets)
-            txId = await provider.sendKaspa(amountOutputs);
-          }
-        } else if (provider && typeof provider.sendTransaction === 'function') {
-          txId = await provider.sendTransaction({ outputs: sompiOutputs });
-        } else {
-          throw new Error('Connected wallet does not expose a recognized send method.');
+      } else if (provider && typeof provider.sendTransaction === 'function') {
+        try {
+          const result = await provider.sendTransaction({ outputs: multiOutputs });
+          multiTxId = typeof result === 'string' ? result : result?.txId ?? 'SUCCESS';
+          usedMultiOutput = true;
+        } catch {
+          // fall through
         }
+      }
 
+      if (usedMultiOutput) {
         setBatchStatuses((prev) => {
           const copy = [...prev];
-          copy[i] = { status: 'sent', txId: typeof txId === 'string' ? txId : (txId as any)?.txId || 'SUCCESS' };
+          copy[i] = { status: 'sent', txId: multiTxId };
           return copy;
         });
-      } catch (err: any) {
+        continue;
+      }
+
+      // --- Attempt 2: single-send loop with per-output progress display ---
+      if (!provider || typeof provider.sendKaspa !== 'function') {
         setBatchStatuses((prev) => {
           const copy = [...prev];
-          copy[i] = { status: 'failed', txId: '', error: err.message || 'Rejected or Failed' };
+          copy[i] = { status: 'failed', txId: '', error: 'Wallet does not expose a recognized send method.' };
           return copy;
         });
         setIsProcessing(false);
         return;
       }
+
+      const recipientsInBatch = PLATFORM_FEE_KAS > 0
+        ? [...batch, { address: TREASURY_ADDRESS, amount: PLATFORM_FEE_KAS, sompi: BigInt(Math.round(PLATFORM_FEE_KAS * 1e8)) }]
+        : batch;
+
+      let lastTxId = '';
+      let outputFailed = false;
+
+      for (let j = 0; j < recipientsInBatch.length; j++) {
+        const recipient = recipientsInBatch[j];
+        setBatchStatuses((prev) => {
+          const copy = [...prev];
+          copy[i] = {
+            ...copy[i],
+            status: 'signing',
+            signingProgress: `${j + 1} of ${recipientsInBatch.length}`,
+          };
+          return copy;
+        });
+
+        try {
+          const result = await provider.sendKaspa(
+            recipient.address,
+            Math.round(recipient.amount * 1e8),
+          );
+          lastTxId = typeof result === 'string' ? result : result?.txId ?? '';
+        } catch (err: any) {
+          setBatchStatuses((prev) => {
+            const copy = [...prev];
+            copy[i] = { status: 'failed', txId: '', error: err.message || 'Rejected or failed' };
+            return copy;
+          });
+          outputFailed = true;
+          break;
+        }
+      }
+
+      if (outputFailed) {
+        setIsProcessing(false);
+        return;
+      }
+
+      setBatchStatuses((prev) => {
+        const copy = [...prev];
+        copy[i] = { status: 'sent', txId: lastTxId, sentCount: recipientsInBatch.length };
+        return copy;
+      });
     }
 
     setIsProcessing(false);
@@ -447,16 +501,22 @@ export default function Home() {
                         )}
                       </div>
 
-                      <div>
+                      <div className="text-right shrink-0">
                         {status.status === 'pending' && <span className="text-zinc-500">Pending</span>}
                         {status.status === 'signing' && (
-                          <span className="text-amber-400 flex items-center gap-1">
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Signing
+                          <span className="text-amber-400 flex items-center gap-1.5">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            {status.signingProgress
+                              ? `Signing ${status.signingProgress}`
+                              : 'Signing'}
                           </span>
                         )}
                         {status.status === 'sent' && (
                           <span className="text-emerald-400 flex items-center gap-1">
-                            <CheckCircle2 className="h-3.5 w-3.5" /> Sent
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            {status.sentCount && status.sentCount > 1
+                              ? `${status.sentCount} sent`
+                              : 'Sent'}
                           </span>
                         )}
                         {status.status === 'failed' && (

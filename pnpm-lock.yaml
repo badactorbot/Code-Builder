@@ -221,6 +221,10 @@ importers:
         version: 3.1.0
 
   artifacts/kaspa-disperse:
+    dependencies:
+      kaspa-wasm:
+        specifier: ^0.13.0
+        version: 0.13.0
     devDependencies:
       '@hookform/resolvers':
         specifier: ^3.10.0
@@ -2341,6 +2345,9 @@ packages:
   jsonpointer@5.0.1:
     resolution: {integrity: sha512-p/nXbhSEcu3pZRdkW1OfJhpsVtW1gd4Wa1fnQc9YLiTfAjn0312eMKimbdIQzuZl9aa9xUGaRlP9T/CJE/ditQ==}
     engines: {node: '>=0.10.0'}
+
+  kaspa-wasm@0.13.0:
+    resolution: {integrity: sha512-PvHeFWezBnX5xAwOwnWGl2Xxu7rvynfd4FGTgkQrPK2nWWdysLZyx7TuFld/keQ89E6ndhsUpWUAAG/0itMksg==}
 
   leven@4.1.0:
     resolution: {integrity: sha512-KZ9W9nWDT7rF7Dazg8xyLHGLrmpgq2nVNFUckhqdW3szVP6YhCpp/RAnpmVExA9JvrMynjwSLVrEj3AepHR6ew==}
@@ -4842,6 +4849,8 @@ snapshots:
       graceful-fs: 4.2.11
 
   jsonpointer@5.0.1: {}
+
+  kaspa-wasm@0.13.0: {}
 
   leven@4.1.0: {}
 
