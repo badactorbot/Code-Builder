@@ -231,66 +231,32 @@ export default function Home() {
 
       const provider = account.provider;
 
-      // Build the multi-output payload. KasWare uses { address, sompi }.
-      const multiOutputs = batch.map((r) => ({
-        address: r.address,
-        sompi: Math.round(r.amount * 1e8),
-      }));
-      if (PLATFORM_FEE_KAS > 0) {
-        multiOutputs.push({ address: TREASURY_ADDRESS, sompi: Math.round(PLATFORM_FEE_KAS * 1e8) });
-      }
-
-      // --- Attempt 1: multi-output array (one tx, one signature) ---
-      let usedMultiOutput = false;
-      let multiTxId = '';
-
-      if (provider && typeof provider.sendKaspa === 'function') {
-        try {
-          const result = await provider.sendKaspa(multiOutputs);
-          multiTxId = typeof result === 'string' ? result : result?.txId ?? 'SUCCESS';
-          usedMultiOutput = true;
-        } catch {
-          // Wallet rejected array format — fall through to per-output loop
-        }
-      } else if (provider && typeof provider.sendTransaction === 'function') {
-        try {
-          const result = await provider.sendTransaction({ outputs: multiOutputs });
-          multiTxId = typeof result === 'string' ? result : result?.txId ?? 'SUCCESS';
-          usedMultiOutput = true;
-        } catch {
-          // fall through
-        }
-      }
-
-      if (usedMultiOutput) {
-        setBatchStatuses((prev) => {
-          const copy = [...prev];
-          copy[i] = { status: 'sent', txId: multiTxId };
-          return copy;
-        });
-        continue;
-      }
-
-      // --- Attempt 2: single-send loop with per-output progress display ---
       if (!provider || typeof provider.sendKaspa !== 'function') {
         setBatchStatuses((prev) => {
           const copy = [...prev];
-          copy[i] = { status: 'failed', txId: '', error: 'Wallet does not expose a recognized send method.' };
+          copy[i] = { status: 'failed', txId: '', error: 'Connected wallet does not expose a send method.' };
           return copy;
         });
         setIsProcessing(false);
         return;
       }
 
-      const recipientsInBatch = PLATFORM_FEE_KAS > 0
-        ? [...batch, { address: TREASURY_ADDRESS, amount: PLATFORM_FEE_KAS, sompi: BigInt(Math.round(PLATFORM_FEE_KAS * 1e8)) }]
-        : batch;
+      // Send each recipient individually. KasWare and all current Kaspa browser
+      // extensions only support single-recipient calls; calling sendKaspa with an
+      // array argument corrupts the extension's internal state so subsequent calls
+      // also fail — so we go straight to the per-output loop.
+      const recipientsInBatch: { address: string; amount: number }[] =
+        PLATFORM_FEE_KAS > 0
+          ? [...batch, { address: TREASURY_ADDRESS, amount: PLATFORM_FEE_KAS }]
+          : batch;
 
       let lastTxId = '';
       let outputFailed = false;
 
       for (let j = 0; j < recipientsInBatch.length; j++) {
         const recipient = recipientsInBatch[j];
+        const sompiAmount = Math.round(recipient.amount * 1e8);
+
         setBatchStatuses((prev) => {
           const copy = [...prev];
           copy[i] = {
@@ -302,15 +268,18 @@ export default function Home() {
         });
 
         try {
-          const result = await provider.sendKaspa(
-            recipient.address,
-            Math.round(recipient.amount * 1e8),
-          );
-          lastTxId = typeof result === 'string' ? result : result?.txId ?? '';
+          // KasWare: sendKaspa(toAddress: string, sompi: number) → Promise<txId: string>
+          const raw = await provider.sendKaspa(recipient.address, sompiAmount);
+          lastTxId = typeof raw === 'string' ? raw : (raw?.txId ?? raw?.id ?? '');
         } catch (err: any) {
+          const msg: string = err?.message ?? String(err);
           setBatchStatuses((prev) => {
             const copy = [...prev];
-            copy[i] = { status: 'failed', txId: '', error: err.message || 'Rejected or failed' };
+            copy[i] = {
+              status: 'failed',
+              txId: '',
+              error: msg || 'Transaction rejected or failed',
+            };
             return copy;
           });
           outputFailed = true;
@@ -325,7 +294,11 @@ export default function Home() {
 
       setBatchStatuses((prev) => {
         const copy = [...prev];
-        copy[i] = { status: 'sent', txId: lastTxId, sentCount: recipientsInBatch.length };
+        copy[i] = {
+          status: 'sent',
+          txId: lastTxId,
+          sentCount: recipientsInBatch.length,
+        };
         return copy;
       });
     }
