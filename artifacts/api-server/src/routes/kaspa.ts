@@ -96,8 +96,12 @@ router.post('/build-tx', async (req, res) => {
 
     const apiBase = API_BASE[networkId] ?? API_BASE.mainnet;
 
-    // ── 1. Fetch UTXOs ────────────────────────────────────────────────────
-    const utxoRes = await fetch(`${apiBase}/addresses/${senderAddress}/utxos`);
+    // ── 1. Fetch UTXOs + mempool-spent outpoints in parallel ─────────────
+    const [utxoRes, txRes] = await Promise.all([
+      fetch(`${apiBase}/addresses/${senderAddress}/utxos`),
+      fetch(`${apiBase}/addresses/${senderAddress}/full-transactions?limit=100&offset=0&resolve_previous_outpoints=no`),
+    ]);
+
     if (!utxoRes.ok) {
       throw new Error(`UTXO fetch failed (${utxoRes.status}): ${await utxoRes.text()}`);
     }
@@ -106,16 +110,36 @@ router.post('/build-tx', async (req, res) => {
       return res.status(400).json({ error: 'No UTXOs found for sender address' });
     }
 
-    // Normalize UTXOs
-    const utxos = rawUtxos.map(u => ({
-      transactionId: u.outpoint.transactionId as string,
-      index: u.outpoint.index as number,
-      amount: BigInt(u.utxoEntry.amount),
-      // REST API stores script under scriptPublicKey.scriptPublicKey (hex)
-      script: u.utxoEntry.scriptPublicKey.scriptPublicKey as string,
-      blockDaaScore: Number(u.utxoEntry.blockDaaScore),
-      isCoinbase: u.utxoEntry.isCoinbase as boolean,
-    }));
+    // Build a set of outpoints already being spent in unconfirmed mempool txs
+    const mempoolSpent = new Set<string>();
+    if (txRes.ok) {
+      const recentTxs = await txRes.json() as any[];
+      for (const tx of recentTxs) {
+        if (tx.is_accepted === false) {
+          for (const inp of (tx.inputs ?? [])) {
+            // index comes back as a string from this endpoint
+            mempoolSpent.add(`${inp.previous_outpoint_hash}:${inp.previous_outpoint_index}`);
+          }
+        }
+      }
+    }
+
+    // Normalize UTXOs, excluding any the mempool is already spending
+    const utxos = rawUtxos
+      .map(u => ({
+        transactionId: u.outpoint.transactionId as string,
+        index: u.outpoint.index as number,
+        amount: BigInt(u.utxoEntry.amount),
+        // REST API stores script under scriptPublicKey.scriptPublicKey (hex)
+        script: u.utxoEntry.scriptPublicKey.scriptPublicKey as string,
+        blockDaaScore: Number(u.utxoEntry.blockDaaScore),
+        isCoinbase: u.utxoEntry.isCoinbase as boolean,
+      }))
+      .filter(u => !mempoolSpent.has(`${u.transactionId}:${u.index}`));
+
+    if (!utxos.length) {
+      return res.status(400).json({ error: 'No spendable UTXOs — all funds are pending in the mempool. Wait for your last transaction to confirm.' });
+    }
 
     // Sort largest first for greedy selection
     utxos.sort((a, b) => (a.amount > b.amount ? -1 : a.amount < b.amount ? 1 : 0));
