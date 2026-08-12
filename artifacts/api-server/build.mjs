@@ -29,6 +29,7 @@ async function buildAll() {
     // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
     external: [
       "*.node",
+      "kaspa-wasm",   // Node.js-only CJS WASM module; must stay external so __dirname resolves correctly
       "sharp",
       "better-sqlite3",
       "sqlite3",

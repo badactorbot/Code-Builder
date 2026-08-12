@@ -69,10 +69,10 @@ interface Recipient {
 }
 
 interface BatchStatus {
-  status: 'pending' | 'signing' | 'sent' | 'failed';
+  status: 'pending' | 'building' | 'signing' | 'sent' | 'failed';
   txId: string;
   error?: string;
-  /** e.g. "2 of 5" — set during per-output single-send fallback */
+  /** e.g. "tx 1 of 2" — shown when multi-output spans compound txs */
   signingProgress?: string;
   /** how many individual txids were sent (single-send fallback) */
   sentCount?: number;
@@ -220,17 +220,101 @@ export default function Home() {
 
     setIsProcessing(true);
 
+    const provider = account.provider;
+    // Detect whether this wallet supports raw-transaction signing (one approval per batch).
+    const canMultiSign =
+      provider &&
+      typeof provider.signKaspaTransaction === 'function' &&
+      typeof provider.pushTx === 'function';
+
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
 
-      setBatchStatuses((prev) => {
-        const copy = [...prev];
-        copy[i] = { ...copy[i], status: 'signing' };
-        return copy;
-      });
+      // ── MULTI-OUTPUT PATH ─────────────────────────────────────────────────
+      // Uses kaspa-wasm (server-side) to build one transaction with all outputs,
+      // then asks the wallet for a single signature for the whole batch.
+      if (canMultiSign) {
+        // 1. Build unsigned transaction on the API server
+        setBatchStatuses((prev) => {
+          const copy = [...prev];
+          copy[i] = { status: 'building', txId: '' };
+          return copy;
+        });
 
-      const provider = account.provider;
+        let pendingTxs: { id: string; txJson: string; paymentAmount: string; feeAmount: string }[];
+        try {
+          const recipients = PLATFORM_FEE_KAS > 0
+            ? [...batch.map(r => ({ address: r.address, amount: r.amount })),
+               { address: TREASURY_ADDRESS, amount: PLATFORM_FEE_KAS }]
+            : batch.map(r => ({ address: r.address, amount: r.amount }));
 
+          const res = await fetch('/api/kaspa/build-tx', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ senderAddress: account.address, recipients }),
+          });
+          const body = await res.json();
+          if (!res.ok) {
+            throw new Error(body.error ?? `Server error ${res.status}`);
+          }
+          pendingTxs = body.pendingTxs;
+        } catch (err: any) {
+          setBatchStatuses((prev) => {
+            const copy = [...prev];
+            copy[i] = { status: 'failed', txId: '', error: err.message ?? 'Failed to build transaction' };
+            return copy;
+          });
+          setIsProcessing(false);
+          return;
+        }
+
+        // 2. Sign each pending transaction (usually exactly 1) and submit
+        let lastTxId = '';
+        let txFailed = false;
+
+        for (let t = 0; t < pendingTxs.length; t++) {
+          const { txJson } = pendingTxs[t];
+
+          setBatchStatuses((prev) => {
+            const copy = [...prev];
+            copy[i] = {
+              status: 'signing',
+              txId: '',
+              signingProgress: pendingTxs.length > 1 ? `tx ${t + 1} of ${pendingTxs.length}` : undefined,
+            };
+            return copy;
+          });
+
+          try {
+            // One wallet popup → user approves the full multi-output transaction
+            const signedJson = await provider.signKaspaTransaction(txJson, ['All']);
+            const pushRaw = await provider.pushTx({ rawtx: signedJson });
+            lastTxId = typeof pushRaw === 'string' ? pushRaw : (pushRaw?.txId ?? pendingTxs[t].id);
+          } catch (err: any) {
+            setBatchStatuses((prev) => {
+              const copy = [...prev];
+              copy[i] = { status: 'failed', txId: '', error: err?.message ?? 'Signing or submission failed' };
+              return copy;
+            });
+            txFailed = true;
+            break;
+          }
+        }
+
+        if (txFailed) { setIsProcessing(false); return; }
+
+        setBatchStatuses((prev) => {
+          const copy = [...prev];
+          copy[i] = { status: 'sent', txId: lastTxId };
+          return copy;
+        });
+
+        continue; // next batch
+      }
+
+      // ── SINGLE-OUTPUT FALLBACK ────────────────────────────────────────────
+      // Used when the wallet doesn't expose signKaspaTransaction / pushTx.
+      // One wallet approval per recipient.
       if (!provider || typeof provider.sendKaspa !== 'function') {
         setBatchStatuses((prev) => {
           const copy = [...prev];
@@ -241,10 +325,6 @@ export default function Home() {
         return;
       }
 
-      // Send each recipient individually. KasWare and all current Kaspa browser
-      // extensions only support single-recipient calls; calling sendKaspa with an
-      // array argument corrupts the extension's internal state so subsequent calls
-      // also fail — so we go straight to the per-output loop.
       const recipientsInBatch: { address: string; amount: number }[] =
         PLATFORM_FEE_KAS > 0
           ? [...batch, { address: TREASURY_ADDRESS, amount: PLATFORM_FEE_KAS }]
@@ -255,8 +335,6 @@ export default function Home() {
 
       for (let j = 0; j < recipientsInBatch.length; j++) {
         const recipient = recipientsInBatch[j];
-        const sompiAmount = Math.round(recipient.amount * 1e8);
-
         setBatchStatuses((prev) => {
           const copy = [...prev];
           copy[i] = {
@@ -268,18 +346,12 @@ export default function Home() {
         });
 
         try {
-          // KasWare: sendKaspa(toAddress: string, sompi: number) → Promise<txId: string>
-          const raw = await provider.sendKaspa(recipient.address, sompiAmount);
+          const raw = await provider.sendKaspa(recipient.address, Math.round(recipient.amount * 1e8));
           lastTxId = typeof raw === 'string' ? raw : (raw?.txId ?? raw?.id ?? '');
         } catch (err: any) {
-          const msg: string = err?.message ?? String(err);
           setBatchStatuses((prev) => {
             const copy = [...prev];
-            copy[i] = {
-              status: 'failed',
-              txId: '',
-              error: msg || 'Transaction rejected or failed',
-            };
+            copy[i] = { status: 'failed', txId: '', error: err?.message ?? 'Transaction rejected or failed' };
             return copy;
           });
           outputFailed = true;
@@ -287,18 +359,11 @@ export default function Home() {
         }
       }
 
-      if (outputFailed) {
-        setIsProcessing(false);
-        return;
-      }
+      if (outputFailed) { setIsProcessing(false); return; }
 
       setBatchStatuses((prev) => {
         const copy = [...prev];
-        copy[i] = {
-          status: 'sent',
-          txId: lastTxId,
-          sentCount: recipientsInBatch.length,
-        };
+        copy[i] = { status: 'sent', txId: lastTxId, sentCount: recipientsInBatch.length };
         return copy;
       });
     }
@@ -476,12 +541,17 @@ export default function Home() {
 
                       <div className="text-right shrink-0">
                         {status.status === 'pending' && <span className="text-zinc-500">Pending</span>}
+                        {status.status === 'building' && (
+                          <span className="text-sky-400 flex items-center gap-1.5">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Building…
+                          </span>
+                        )}
                         {status.status === 'signing' && (
                           <span className="text-amber-400 flex items-center gap-1.5">
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             {status.signingProgress
                               ? `Signing ${status.signingProgress}`
-                              : 'Signing'}
+                              : 'Approve in wallet'}
                           </span>
                         )}
                         {status.status === 'sent' && (

@@ -1,0 +1,1 @@
+- [Kaspa tx building without kaspa-wasm](kaspa-wasm-build-tx.md) — Generator/createTransactions fail for manual UTXOs; use pure-JS bech32 decoder + manual SignableTransaction JSON instead.
