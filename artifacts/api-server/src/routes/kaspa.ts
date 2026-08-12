@@ -229,4 +229,74 @@ router.post('/build-tx', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// POST /api/kaspa/push-tx
+// Body: { signedTxJson: string, networkId?: string }
+//
+// Accepts the signed transaction JSON returned by KasWare.signKaspaTransaction()
+// and broadcasts it to the Kaspa network via the public REST API.
+// This is the fallback for wallets that expose signKaspaTransaction but not pushTx.
+// ---------------------------------------------------------------------------
+router.post('/push-tx', async (req, res) => {
+  try {
+    const { signedTxJson, networkId = 'mainnet' } = req.body as {
+      signedTxJson: string;
+      networkId?: string;
+    };
+
+    if (!signedTxJson) {
+      return res.status(400).json({ error: 'signedTxJson is required' });
+    }
+
+    const apiBase = API_BASE[networkId] ?? API_BASE.mainnet;
+
+    // Parse the SignableTransaction JSON from the wallet
+    const tx = typeof signedTxJson === 'string' ? JSON.parse(signedTxJson) : signedTxJson;
+
+    // Map to Kaspa REST API SubmitTransactionRequest format:
+    // - Strip the 'utxo' field from inputs (signing metadata, not needed for broadcast)
+    // - Rename scriptPublicKey.script → scriptPublicKey.scriptPublicKey (REST API key name)
+    const submitTx = {
+      version: tx.version ?? 0,
+      inputs: (tx.inputs ?? []).map((inp: any) => ({
+        previousOutpoint: {
+          transactionId: inp.previousOutpoint?.transactionId,
+          index: inp.previousOutpoint?.index,
+        },
+        signatureScript: inp.signatureScript ?? '',
+        sequence: inp.sequence ?? 0,
+        sigOpCount: inp.sigOpCount ?? 1,
+      })),
+      outputs: (tx.outputs ?? []).map((out: any) => ({
+        amount: out.amount,
+        scriptPublicKey: {
+          version: out.scriptPublicKey?.version ?? 0,
+          // Our build-tx uses 'script' key; REST API expects 'scriptPublicKey'
+          scriptPublicKey: out.scriptPublicKey?.scriptPublicKey ?? out.scriptPublicKey?.script ?? '',
+        },
+      })),
+      lockTime: tx.lockTime ?? 0,
+      subnetworkId: tx.subnetworkId ?? '0000000000000000000000000000000000000000',
+    };
+
+    const submitRes = await fetch(`${apiBase}/transactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transaction: submitTx, allowOrphan: false }),
+    });
+
+    const submitBody = await submitRes.json() as any;
+
+    if (!submitRes.ok) {
+      throw new Error(submitBody?.detail ?? submitBody?.error ?? `Kaspa node rejected transaction (${submitRes.status})`);
+    }
+
+    return res.json({
+      txId: submitBody.transactionId ?? submitBody.txId ?? '',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? 'Broadcast failed' });
+  }
+});
+
 export default router;

@@ -222,10 +222,15 @@ export default function Home() {
 
     const provider = account.provider;
     // Detect whether this wallet supports raw-transaction signing (one approval per batch).
-    const canMultiSign =
-      provider &&
-      typeof provider.signKaspaTransaction === 'function' &&
-      typeof provider.pushTx === 'function';
+    // Only signKaspaTransaction is required — pushTx is attempted first but we fall back
+    // to server-side broadcast if the wallet doesn't expose it.
+    const canMultiSign = provider && typeof provider.signKaspaTransaction === 'function';
+    console.log('[KaspaDisperse] provider methods:', {
+      signKaspaTransaction: typeof provider?.signKaspaTransaction,
+      pushTx: typeof provider?.pushTx,
+      sendKaspa: typeof provider?.sendKaspa,
+      canMultiSign,
+    });
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
@@ -288,7 +293,21 @@ export default function Home() {
           try {
             // One wallet popup → user approves the full multi-output transaction
             const signedJson = await provider.signKaspaTransaction(txJson, ['All']);
-            const pushRaw = await provider.pushTx({ rawtx: signedJson });
+
+            // Broadcast: try wallet's pushTx first; fall back to server-side broadcast
+            let pushRaw: any;
+            if (typeof provider.pushTx === 'function') {
+              pushRaw = await provider.pushTx({ rawtx: signedJson });
+            } else {
+              const pushRes = await fetch('/api/kaspa/push-tx', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ signedTxJson: signedJson }),
+              });
+              const pushBody = await pushRes.json();
+              if (!pushRes.ok) throw new Error(pushBody.error ?? `Broadcast failed ${pushRes.status}`);
+              pushRaw = pushBody.txId ?? pushBody.transactionId ?? '';
+            }
             lastTxId = typeof pushRaw === 'string' ? pushRaw : (pushRaw?.txId ?? pendingTxs[t].id);
           } catch (err: any) {
             setBatchStatuses((prev) => {
