@@ -108,7 +108,7 @@ export default function Home() {
   const [mode, setMode] = useState<'kas' | 'krc20'>('kas');
 
   // ── KRC-20 token state ────────────────────────────────────────────────
-  const [walletTokens, setWalletTokens] = useState<{ tick: string; rawBalance: bigint }[]>([]);
+  const [walletTokens, setWalletTokens] = useState<{ tick: string; rawBalance: bigint; dec: string; state: string }[]>([]);
   const [walletTokensLoading, setWalletTokensLoading] = useState(false);
   const [walletTokensError, setWalletTokensError] = useState('');
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
@@ -141,60 +141,49 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [isWalletModalOpen]);
 
-  // ── Fetch all KRC-20 tokens held by the connected wallet ─────────────
-  const fetchWalletTokens = useCallback(async (provider: any) => {
-    if (!provider || typeof provider.getKRC20Balance !== 'function') {
-      setWalletTokensError('Your wallet does not support KRC-20 balance lookup.');
-      return;
-    }
+  // ── Fetch all KRC-20 tokens held by the connected wallet via Kasplex ──
+  // Uses the address-based Kasplex endpoint — works with any wallet.
+  const fetchWalletTokens = useCallback(async (address: string) => {
+    if (!address) return;
     setWalletTokensLoading(true);
     setWalletTokensError('');
     setWalletTokens([]);
     setTokenInfo(null);
     setTokenWalletBalance(null);
     try {
-      const balances: any[] = await provider.getKRC20Balance();
-      const parsed = (balances ?? [])
+      const res = await fetch(`${KASPLEX_API}/krc20/address/${encodeURIComponent(address)}/tokenlist`);
+      const data = await res.json();
+      const results: any[] = data?.result ?? [];
+      const parsed = results
         .filter((b: any) => b.tick && BigInt(b.balance ?? '0') > 0n)
-        .map((b: any) => ({ tick: String(b.tick).toUpperCase(), rawBalance: BigInt(b.balance ?? '0') }));
+        .map((b: any) => ({
+          tick: String(b.tick).toUpperCase(),
+          rawBalance: BigInt(b.balance ?? '0'),
+          dec: String(b.dec ?? '8'),
+          state: String(b.opScoreMod ? 'active' : ''),
+        }));
       setWalletTokens(parsed);
-      if (parsed.length === 0) setWalletTokensError('No KRC-20 tokens found in this wallet.');
+      if (parsed.length === 0) setWalletTokensError('No KRC-20 tokens found for this address.');
     } catch {
-      setWalletTokensError('Failed to load KRC-20 tokens from wallet.');
+      setWalletTokensError('Failed to load KRC-20 tokens from Kasplex.');
     } finally {
       setWalletTokensLoading(false);
     }
   }, []);
 
-  // ── Select a token: fetch its decimal info from Kasplex ──────────────
-  const handleSelectToken = useCallback(async (tick: string, rawBalance: bigint) => {
-    setTokenSelectLoading(true);
-    setTokenInfo(null);
-    setTokenWalletBalance(null);
-    try {
-      const res = await fetch(`${KASPLEX_API}/krc20/token/${encodeURIComponent(tick)}`);
-      const data = await res.json();
-      const info = data?.result?.[0];
-      const dec = info?.dec ?? '8';
-      const state = info?.state ?? '';
-      setTokenInfo({ tick, dec, state });
-      const decNum = parseInt(dec, 10);
-      const whole = Number(rawBalance) / Math.pow(10, decNum);
-      setTokenWalletBalance(whole.toLocaleString(undefined, { maximumFractionDigits: decNum }));
-    } catch {
-      // Still allow selection; default 8 decimals
-      setTokenInfo({ tick, dec: '8', state: '' });
-      const whole = Number(rawBalance) / 1e8;
-      setTokenWalletBalance(whole.toLocaleString(undefined, { maximumFractionDigits: 8 }));
-    } finally {
-      setTokenSelectLoading(false);
-    }
+  // ── Select a token — all info already loaded from the token list ──────
+  const handleSelectToken = useCallback((tick: string, rawBalance: bigint, dec: string, state: string) => {
+    setTokenSelectLoading(false);
+    setTokenInfo({ tick, dec, state });
+    const decNum = parseInt(dec, 10);
+    const whole = Number(rawBalance) / Math.pow(10, decNum);
+    setTokenWalletBalance(whole.toLocaleString(undefined, { maximumFractionDigits: decNum }));
   }, []);
 
   // ── Auto-fetch wallet tokens when switching to KRC-20 mode or connecting ─
   useEffect(() => {
-    if (mode === 'krc20' && account?.provider) {
-      fetchWalletTokens(account.provider);
+    if (mode === 'krc20' && account?.address) {
+      fetchWalletTokens(account.address);
     }
     if (mode !== 'krc20') {
       setWalletTokens([]);
@@ -670,9 +659,9 @@ export default function Home() {
                   <Coins className="h-4 w-4 text-violet-400" />
                   Select Token
                 </label>
-                {account?.provider && (
+                {account?.address && (
                   <button
-                    onClick={() => fetchWalletTokens(account.provider)}
+                    onClick={() => fetchWalletTokens(account.address)}
                     disabled={walletTokensLoading}
                     className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-violet-300 transition disabled:opacity-50"
                     title="Refresh token list"
@@ -709,13 +698,14 @@ export default function Home() {
               {/* Token grid */}
               {account && !walletTokensLoading && walletTokens.length > 0 && (
                 <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
-                  {walletTokens.map(({ tick, rawBalance }) => {
+                  {walletTokens.map(({ tick, rawBalance, dec, state }) => {
                     const isSelected = tokenInfo?.tick === tick;
-                    const displayBalance = (Number(rawBalance) / 1e8).toLocaleString(undefined, { maximumFractionDigits: 4 });
+                    const decNum = parseInt(dec, 10);
+                    const displayBalance = (Number(rawBalance) / Math.pow(10, decNum)).toLocaleString(undefined, { maximumFractionDigits: 4 });
                     return (
                       <button
                         key={tick}
-                        onClick={() => !tokenSelectLoading && handleSelectToken(tick, rawBalance)}
+                        onClick={() => !tokenSelectLoading && handleSelectToken(tick, rawBalance, dec, state)}
                         disabled={tokenSelectLoading}
                         className={`text-left rounded-xl border p-3 transition ${
                           isSelected
