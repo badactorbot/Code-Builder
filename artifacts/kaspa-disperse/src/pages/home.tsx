@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Wallet, Upload, Send, CheckCircle2, AlertCircle, X, Download, 
-  ExternalLink, Loader2, FileText, Layers, ShieldCheck 
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Wallet, Upload, Send, CheckCircle2, AlertCircle, X, Download,
+  ExternalLink, Loader2, FileText, Layers, ShieldCheck, Coins, Search,
 } from 'lucide-react';
 
 // ==========================================
@@ -61,7 +61,11 @@ const KASPA_WALLETS = [
 const BATCH_SIZE = 50;
 const PLATFORM_FEE_KAS = 0;
 const TREASURY_ADDRESS = 'kaspa:qpzpfwcsqsxhxwup26r55fd0ghqlhyugz8cp6y3wxuddc02vcxtjg75pspnwz';
+const KASPLEX_API = 'https://api.kasplex.org/v1';
 
+// ==========================================
+// TYPES
+// ==========================================
 interface Recipient {
   address: string;
   amount: number;
@@ -72,9 +76,7 @@ interface BatchStatus {
   status: 'pending' | 'building' | 'signing' | 'sent' | 'failed';
   txId: string;
   error?: string;
-  /** e.g. "tx 1 of 2" — shown when multi-output spans compound txs */
   signingProgress?: string;
-  /** how many individual txids were sent (single-send fallback) */
   sentCount?: number;
 }
 
@@ -85,13 +87,34 @@ interface WalletAccount {
   provider: any;
 }
 
+interface TokenInfo {
+  tick: string;
+  dec: string;   // decimal places, e.g. "8"
+  state: string; // "finished" | "deployed"
+}
+
+// ==========================================
+// MAIN COMPONENT
+// ==========================================
 export default function Home() {
+  // ── Wallet state ──────────────────────────────────────────────────────
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [account, setAccount] = useState<WalletAccount | null>(null);
   const [walletLoading, setWalletLoading] = useState<string | null>(null);
   const [walletError, setWalletError] = useState('');
   const [installedMap, setInstalledMap] = useState<Record<string, boolean>>({});
 
+  // ── Mode: 'kas' = native KAS, 'krc20' = KRC-20 token ─────────────────
+  const [mode, setMode] = useState<'kas' | 'krc20'>('kas');
+
+  // ── KRC-20 token state ────────────────────────────────────────────────
+  const [tokenTicker, setTokenTicker] = useState('');
+  const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
+  const [tokenInfoLoading, setTokenInfoLoading] = useState(false);
+  const [tokenInfoError, setTokenInfoError] = useState('');
+  const [tokenWalletBalance, setTokenWalletBalance] = useState<string | null>(null);
+
+  // ── Recipients / batches ──────────────────────────────────────────────
   const [rawInput, setRawInput] = useState('');
   const [parsedRecipients, setParsedRecipients] = useState<Recipient[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
@@ -101,6 +124,7 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Detect installed wallets ──────────────────────────────────────────
   useEffect(() => {
     const checkProviders = () => {
       const map: Record<string, boolean> = {};
@@ -111,22 +135,76 @@ export default function Home() {
       });
       setInstalledMap(map);
     };
-
     checkProviders();
     const timer = setTimeout(checkProviders, 600);
     return () => clearTimeout(timer);
   }, [isWalletModalOpen]);
 
+  // ── Fetch KRC-20 token info from Kasplex ─────────────────────────────
+  const fetchTokenInfo = useCallback(async (tick: string) => {
+    const upper = tick.trim().toUpperCase();
+    if (!upper) {
+      setTokenInfo(null);
+      setTokenInfoError('');
+      setTokenWalletBalance(null);
+      return;
+    }
+
+    setTokenInfoLoading(true);
+    setTokenInfoError('');
+    setTokenInfo(null);
+    setTokenWalletBalance(null);
+
+    try {
+      const res = await fetch(`${KASPLEX_API}/krc20/token/${encodeURIComponent(upper)}`);
+      const data = await res.json();
+      const info = data?.result?.[0];
+      if (!info) {
+        setTokenInfoError(`Token "${upper}" not found on Kasplex`);
+        setTokenInfoLoading(false);
+        return;
+      }
+      setTokenInfo({ tick: info.tick, dec: info.dec ?? '8', state: info.state ?? '' });
+
+      // Fetch wallet KRC-20 balance if connected
+      if (account?.provider && typeof account.provider.getKRC20Balance === 'function') {
+        try {
+          const balances: any[] = await account.provider.getKRC20Balance();
+          const found = balances.find((b: any) => b.tick?.toUpperCase() === upper);
+          if (found) {
+            const raw = BigInt(found.balance ?? '0');
+            const dec = parseInt(info.dec ?? '8', 10);
+            const whole = Number(raw) / Math.pow(10, dec);
+            setTokenWalletBalance(whole.toLocaleString(undefined, { maximumFractionDigits: dec }));
+          } else {
+            setTokenWalletBalance('0');
+          }
+        } catch {
+          setTokenWalletBalance(null);
+        }
+      }
+    } catch {
+      setTokenInfoError('Failed to fetch token info from Kasplex');
+    } finally {
+      setTokenInfoLoading(false);
+    }
+  }, [account]);
+
+  // Re-fetch balance when wallet connects while in KRC-20 mode
+  useEffect(() => {
+    if (mode === 'krc20' && tokenTicker && account) {
+      fetchTokenInfo(tokenTicker);
+    }
+  }, [account, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Connect wallet ────────────────────────────────────────────────────
   const handleConnectWallet = async (wallet: typeof KASPA_WALLETS[0]) => {
     setWalletError('');
     setWalletLoading(wallet.id);
-
     try {
       if (wallet.type === 'extension') {
         const provider = wallet.getProvider ? wallet.getProvider() : null;
-        if (!provider) {
-          throw new Error(`${wallet.name} is not installed in your browser.`);
-        }
+        if (!provider) throw new Error(`${wallet.name} is not installed in your browser.`);
 
         let accounts: any[] = [];
         if (typeof provider.requestAccounts === 'function') {
@@ -139,12 +217,7 @@ export default function Home() {
 
         if (accounts && accounts.length > 0) {
           const selectedAddr = typeof accounts[0] === 'string' ? accounts[0] : accounts[0].address;
-          setAccount({
-            address: selectedAddr,
-            walletId: wallet.id,
-            walletName: wallet.name,
-            provider,
-          });
+          setAccount({ address: selectedAddr, walletId: wallet.id, walletName: wallet.name, provider });
           setIsWalletModalOpen(false);
         } else {
           throw new Error('No account returned from wallet.');
@@ -159,6 +232,7 @@ export default function Home() {
     }
   };
 
+  // ── Parse recipient list ──────────────────────────────────────────────
   const handleParseInput = (text: string) => {
     setRawInput(text);
     const lines = text.split('\n');
@@ -177,7 +251,7 @@ export default function Home() {
         const isValidAddress = address.startsWith('kaspa:') || address.startsWith('kaspatest:');
 
         if (!isValidAddress) {
-          errors.push(`Line ${index + 1}: Invalid Kaspa address format (${address.slice(0, 12)}...)`);
+          errors.push(`Line ${index + 1}: Invalid Kaspa address (${address.slice(0, 12)}...)`);
         } else if (isNaN(amount) || amount <= 0) {
           errors.push(`Line ${index + 1}: Invalid amount "${amountStr}"`);
         } else {
@@ -203,27 +277,148 @@ export default function Home() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (event) => {
-      handleParseInput(event.target?.result as string);
-    };
+    reader.onload = (event) => handleParseInput(event.target?.result as string);
     reader.readAsText(file);
   };
 
-  const totalKasToSend = parsedRecipients.reduce((sum, r) => sum + r.amount, 0);
+  const totalToSend = parsedRecipients.reduce((sum, r) => sum + r.amount, 0);
+  const tokenLabel = mode === 'kas' ? 'KAS' : ((tokenInfo?.tick ?? tokenTicker.toUpperCase()) || 'TOKEN');
 
+  // ── Switch mode ───────────────────────────────────────────────────────
+  const handleModeSwitch = (newMode: 'kas' | 'krc20') => {
+    setMode(newMode);
+    setTokenInfo(null);
+    setTokenInfoError('');
+    setTokenWalletBalance(null);
+    // Re-parse to rebuild batches (same data, same logic)
+    if (rawInput) handleParseInput(rawInput);
+  };
+
+  // ==========================================
+  // EXECUTE DISPERSE
+  // ==========================================
   const handleExecuteDisperse = async () => {
-    if (!account) {
-      setIsWalletModalOpen(true);
-      return;
-    }
+    if (!account) { setIsWalletModalOpen(true); return; }
     if (batches.length === 0) return;
+
+    // KRC-20 mode validation
+    if (mode === 'krc20') {
+      if (!tokenInfo) {
+        alert('Please enter and verify a valid KRC-20 token ticker first.');
+        return;
+      }
+      if (typeof account.provider?.krc20BatchTransferTransaction !== 'function') {
+        alert('Your connected wallet does not support KRC-20 batch transfers. Please use KasWare wallet (latest version).');
+        return;
+      }
+    }
 
     setIsProcessing(true);
 
+    if (mode === 'krc20') {
+      await executeKrc20Disperse();
+    } else {
+      await executeKasDisperse();
+    }
+
+    setIsProcessing(false);
+  };
+
+  // ── KRC-20 execution: uses KasWare's krc20BatchTransferTransaction ────
+  const executeKrc20Disperse = async () => {
+    if (!account || !tokenInfo) return;
     const provider = account.provider;
-    // Detect whether this wallet supports raw-transaction signing (one approval per batch).
-    // Only signKaspaTransaction is required — pushTx is attempted first but we fall back
-    // to server-side broadcast if the wallet doesn't expose it.
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+
+      setBatchStatuses((prev) => {
+        const copy = [...prev];
+        copy[i] = { status: 'signing', txId: '', signingProgress: `0 of ${batch.length}` };
+        return copy;
+      });
+
+      // Build IBatchTransfer list for this batch
+      const list = batch.map((r) => ({
+        tick: tokenInfo.tick,
+        dec: tokenInfo.dec,
+        to: r.address,
+        amount: r.amount.toString(),
+      }));
+
+      try {
+        // Use a Promise to wait for all krc20BatchTransferChanged events for this batch
+        const batchResult = await new Promise<{ lastRevealId: string; anyFailed: boolean }>(
+          (resolve, reject) => {
+            let completed = 0;
+            let lastRevealId = '';
+            let anyFailed = false;
+            const total = list.length;
+
+            const handler = (results: any[]) => {
+              for (const r of (Array.isArray(results) ? results : [results])) {
+                completed++;
+                if (r.status === 'success') lastRevealId = r.txId?.revealId ?? lastRevealId;
+                if (r.status === 'failed') anyFailed = true;
+
+                setBatchStatuses((prev) => {
+                  const copy = [...prev];
+                  copy[i] = {
+                    status: completed >= total ? (anyFailed ? 'failed' : 'sent') : 'signing',
+                    txId: lastRevealId,
+                    signingProgress: `${completed} of ${total}`,
+                    error: anyFailed ? 'Some transfers failed — check explorer' : undefined,
+                  };
+                  return copy;
+                });
+
+                if (completed >= total) {
+                  provider.removeListener?.('krc20BatchTransferChanged', handler);
+                  resolve({ lastRevealId, anyFailed });
+                }
+              }
+            };
+
+            provider.on?.('krc20BatchTransferChanged', handler);
+
+            provider.krc20BatchTransferTransaction(list)
+              .then(() => {
+                // Promise resolves after user approves; events continue to fire as each tx completes.
+                // If the wallet resolves only after all are done and no events fired, resolve now.
+                if (completed >= total) {
+                  provider.removeListener?.('krc20BatchTransferChanged', handler);
+                  resolve({ lastRevealId, anyFailed });
+                }
+              })
+              .catch((err: any) => {
+                provider.removeListener?.('krc20BatchTransferChanged', handler);
+                reject(err);
+              });
+          }
+        );
+
+        if (batchResult.anyFailed) { setIsProcessing(false); return; }
+      } catch (err: any) {
+        setBatchStatuses((prev) => {
+          const copy = [...prev];
+          copy[i] = {
+            status: 'failed',
+            txId: '',
+            error: err?.message ?? 'Batch transfer rejected or failed',
+          };
+          return copy;
+        });
+        setIsProcessing(false);
+        return;
+      }
+    }
+  };
+
+  // ── KAS execution: multi-output path with server-built tx ─────────────
+  const executeKasDisperse = async () => {
+    if (!account) return;
+    const provider = account.provider;
+
     const canMultiSign = provider && typeof provider.signKaspaTransaction === 'function';
     console.log('[KaspaDisperse] provider methods:', {
       signKaspaTransaction: typeof provider?.signKaspaTransaction,
@@ -235,11 +430,8 @@ export default function Home() {
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
 
-      // ── MULTI-OUTPUT PATH ─────────────────────────────────────────────────
-      // Uses kaspa-wasm (server-side) to build one transaction with all outputs,
-      // then asks the wallet for a single signature for the whole batch.
+      // ── MULTI-OUTPUT PATH ────────────────────────────────────────────
       if (canMultiSign) {
-        // 1. Build unsigned transaction on the API server
         setBatchStatuses((prev) => {
           const copy = [...prev];
           copy[i] = { status: 'building', txId: '' };
@@ -249,9 +441,8 @@ export default function Home() {
         let pendingTxs: { id: string; txJson: string; paymentAmount: string; feeAmount: string }[];
         try {
           const recipients = PLATFORM_FEE_KAS > 0
-            ? [...batch.map(r => ({ address: r.address, amount: r.amount })),
-               { address: TREASURY_ADDRESS, amount: PLATFORM_FEE_KAS }]
-            : batch.map(r => ({ address: r.address, amount: r.amount }));
+            ? [...batch.map((r) => ({ address: r.address, amount: r.amount })), { address: TREASURY_ADDRESS, amount: PLATFORM_FEE_KAS }]
+            : batch.map((r) => ({ address: r.address, amount: r.amount }));
 
           const res = await fetch('/api/kaspa/build-tx', {
             method: 'POST',
@@ -259,9 +450,7 @@ export default function Home() {
             body: JSON.stringify({ senderAddress: account.address, recipients }),
           });
           const body = await res.json();
-          if (!res.ok) {
-            throw new Error(body.error ?? `Server error ${res.status}`);
-          }
+          if (!res.ok) throw new Error(body.error ?? `Server error ${res.status}`);
           pendingTxs = body.pendingTxs;
         } catch (err: any) {
           setBatchStatuses((prev) => {
@@ -273,7 +462,6 @@ export default function Home() {
           return;
         }
 
-        // 2. Sign each pending transaction (usually exactly 1) and submit
         let lastTxId = '';
         let txFailed = false;
 
@@ -291,10 +479,8 @@ export default function Home() {
           });
 
           try {
-            // One wallet popup → user approves the full multi-output transaction
             const signedJson = await provider.signKaspaTransaction(txJson, ['All']);
 
-            // Broadcast: try wallet's pushTx first; fall back to server-side broadcast
             let pushRaw: any;
             if (typeof provider.pushTx === 'function') {
               pushRaw = await provider.pushTx({ rawtx: signedJson });
@@ -327,13 +513,10 @@ export default function Home() {
           copy[i] = { status: 'sent', txId: lastTxId };
           return copy;
         });
-
-        continue; // next batch
+        continue;
       }
 
-      // ── SINGLE-OUTPUT FALLBACK ────────────────────────────────────────────
-      // Used when the wallet doesn't expose signKaspaTransaction / pushTx.
-      // One wallet approval per recipient.
+      // ── SINGLE-OUTPUT FALLBACK ───────────────────────────────────────
       if (!provider || typeof provider.sendKaspa !== 'function') {
         setBatchStatuses((prev) => {
           const copy = [...prev];
@@ -344,7 +527,7 @@ export default function Home() {
         return;
       }
 
-      const recipientsInBatch: { address: string; amount: number }[] =
+      const recipientsInBatch =
         PLATFORM_FEE_KAS > 0
           ? [...batch, { address: TREASURY_ADDRESS, amount: PLATFORM_FEE_KAS }]
           : batch;
@@ -356,11 +539,7 @@ export default function Home() {
         const recipient = recipientsInBatch[j];
         setBatchStatuses((prev) => {
           const copy = [...prev];
-          copy[i] = {
-            ...copy[i],
-            status: 'signing',
-            signingProgress: `${j + 1} of ${recipientsInBatch.length}`,
-          };
+          copy[i] = { ...copy[i], status: 'signing', signingProgress: `${j + 1} of ${recipientsInBatch.length}` };
           return copy;
         });
 
@@ -386,26 +565,28 @@ export default function Home() {
         return copy;
       });
     }
-
-    setIsProcessing(false);
   };
 
+  // ==========================================
+  // RENDER
+  // ==========================================
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans flex flex-col">
-      
-      {/* HEADER NAV */}
+
+      {/* HEADER */}
       <header className="border-b border-zinc-800 bg-zinc-900/60 backdrop-blur-md px-6 py-4 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-3">
           <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 shadow-lg shadow-emerald-500/20">
-            <div className="h-full w-full bg-zinc-950 rounded-[10px] flex items-center justify-center font-black text-emerald-400 text-lg">
-              K
-            </div>
+            <div className="h-full w-full bg-zinc-950 rounded-[10px] flex items-center justify-center font-black text-emerald-400 text-lg">K</div>
           </div>
           <div>
             <h1 className="font-bold tracking-tight text-white flex items-center gap-2">
-              Kaspa Disperse <span className="text-[10px] bg-emerald-950 border border-emerald-800/60 text-emerald-400 px-2 py-0.5 rounded-full uppercase">L1 Native</span>
+              Kaspa Disperse
+              <span className="text-[10px] bg-emerald-950 border border-emerald-800/60 text-emerald-400 px-2 py-0.5 rounded-full uppercase">
+                {mode === 'kas' ? 'L1 Native' : 'KRC-20'}
+              </span>
             </h1>
-            <p className="text-xs text-zinc-400">Bulk KAS payment batcher for high-speed BlockDAG distribution</p>
+            <p className="text-xs text-zinc-400">Bulk payment batcher for KAS &amp; KRC-20 tokens</p>
           </div>
         </div>
 
@@ -441,11 +622,104 @@ export default function Home() {
         </div>
       </header>
 
-      {/* MAIN CONTAINER */}
+      {/* MAIN */}
       <main className="flex-1 max-w-6xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
+
         {/* LEFT COLUMN */}
         <section className="lg:col-span-7 space-y-6">
+
+          {/* MODE TOGGLE */}
+          <div className="rounded-2xl bg-zinc-900 border border-zinc-800 p-4 shadow-xl">
+            <div className="flex items-center gap-1 bg-zinc-950 rounded-xl p-1">
+              <button
+                onClick={() => handleModeSwitch('kas')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition ${
+                  mode === 'kas'
+                    ? 'bg-emerald-500 text-black shadow'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <ShieldCheck className="h-4 w-4" />
+                Native KAS
+              </button>
+              <button
+                onClick={() => handleModeSwitch('krc20')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition ${
+                  mode === 'krc20'
+                    ? 'bg-violet-500 text-white shadow'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Coins className="h-4 w-4" />
+                KRC-20 Token
+              </button>
+            </div>
+          </div>
+
+          {/* KRC-20 TOKEN SELECTOR */}
+          {mode === 'krc20' && (
+            <div className="rounded-2xl bg-zinc-900 border border-zinc-800 p-5 shadow-xl space-y-4">
+              <label className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
+                <Coins className="h-4 w-4 text-violet-400" />
+                Token Ticker
+              </label>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={tokenTicker}
+                  onChange={(e) => setTokenTicker(e.target.value.toUpperCase())}
+                  placeholder="e.g. NACHO"
+                  maxLength={20}
+                  className="flex-1 rounded-xl bg-zinc-950 border border-zinc-800 px-4 py-2.5 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 uppercase tracking-wider transition"
+                />
+                <button
+                  onClick={() => fetchTokenInfo(tokenTicker)}
+                  disabled={!tokenTicker || tokenInfoLoading}
+                  className="flex items-center gap-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-zinc-800 disabled:text-zinc-500 px-4 py-2.5 text-sm font-semibold text-white transition"
+                >
+                  {tokenInfoLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="h-4 w-4" />
+                  )}
+                  Look up
+                </button>
+              </div>
+
+              {tokenInfoError && (
+                <div className="rounded-xl bg-red-950/40 border border-red-800/60 p-3 text-xs text-red-300 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  {tokenInfoError}
+                </div>
+              )}
+
+              {tokenInfo && !tokenInfoError && (
+                <div className="rounded-xl bg-violet-950/30 border border-violet-800/40 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-violet-400" />
+                      <span className="font-bold text-violet-200">{tokenInfo.tick}</span>
+                      <span className="text-[10px] bg-violet-900/60 border border-violet-700/40 text-violet-400 px-2 py-0.5 rounded-full uppercase">
+                        {tokenInfo.state}
+                      </span>
+                    </div>
+                    <span className="text-xs text-zinc-400">Decimals: {tokenInfo.dec}</span>
+                  </div>
+                  {tokenWalletBalance !== null && (
+                    <div className="text-xs text-zinc-400">
+                      Wallet balance: <span className="text-violet-300 font-semibold">{tokenWalletBalance} {tokenInfo.tick}</span>
+                    </div>
+                  )}
+                  <div className="text-xs text-zinc-500">
+                    Enter amounts as whole {tokenInfo.tick} units (e.g. 1.5 = 1.5 {tokenInfo.tick})
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* RECIPIENT INPUT */}
           <div className="rounded-2xl bg-zinc-900 border border-zinc-800 p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between">
               <label className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
@@ -453,13 +727,7 @@ export default function Home() {
                 Recipient Addresses &amp; Amounts
               </label>
               <div>
-                <input
-                  type="file"
-                  accept=".csv, .txt"
-                  ref={fileInputRef}
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
+                <input type="file" accept=".csv,.txt" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   className="flex items-center gap-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition"
@@ -474,13 +742,20 @@ export default function Home() {
               rows={10}
               value={rawInput}
               onChange={(e) => handleParseInput(e.target.value)}
-              placeholder={`kaspa:qq2... 150.5\nkaspa:qr8... 200\nkaspa:qz7... 50`}
+              placeholder={
+                mode === 'kas'
+                  ? `kaspa:qq2... 150.5\nkaspa:qr8... 200\nkaspa:qz7... 50`
+                  : `kaspa:qq2... 1000\nkaspa:qr8... 500\nkaspa:qz7... 250`
+              }
               className="w-full rounded-xl bg-zinc-950 border border-zinc-800 p-4 font-mono text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition resize-none"
             />
 
             <div className="text-xs text-zinc-500 flex justify-between">
-              <span>Format: One entry per line (<code className="text-zinc-400">address amount</code> or <code className="text-zinc-400">address,amount</code>)</span>
-              <span>Outputs capped at {BATCH_SIZE}/batch</span>
+              <span>
+                Format: <code className="text-zinc-400">address amount</code> or <code className="text-zinc-400">address,amount</code>
+                {mode === 'krc20' && <span className="text-violet-400"> — amounts in whole {tokenLabel} units</span>}
+              </span>
+              <span>≤{BATCH_SIZE} outputs/batch</span>
             </div>
 
             {parseErrors.length > 0 && (
@@ -489,9 +764,7 @@ export default function Home() {
                   <AlertCircle className="h-4 w-4" /> Formatting Alerts ({parseErrors.length})
                 </div>
                 <ul className="list-disc list-inside space-y-0.5 text-[11px] opacity-90 max-h-24 overflow-y-auto">
-                  {parseErrors.map((err, idx) => (
-                    <li key={idx}>{err}</li>
-                  ))}
+                  {parseErrors.map((err, idx) => <li key={idx}>{err}</li>)}
                 </ul>
               </div>
             )}
@@ -501,10 +774,10 @@ export default function Home() {
         {/* RIGHT COLUMN */}
         <section className="lg:col-span-5 space-y-6">
           <div className="rounded-2xl bg-zinc-900 border border-zinc-800 p-6 shadow-xl space-y-6 sticky top-24">
-            
+
             <h2 className="text-base font-semibold border-b border-zinc-800 pb-3 flex items-center justify-between">
               <span>Disperse Summary</span>
-              <Layers className="h-4 w-4 text-emerald-400" />
+              <Layers className={`h-4 w-4 ${mode === 'krc20' ? 'text-violet-400' : 'text-emerald-400'}`} />
             </h2>
 
             <div className="grid grid-cols-2 gap-3">
@@ -514,43 +787,64 @@ export default function Home() {
               </div>
 
               <div className="rounded-xl bg-zinc-950 border border-zinc-800/80 p-3.5">
-                <div className="text-xs text-zinc-400">Total KAS</div>
-                <div className="text-xl font-bold text-emerald-400 mt-1">
-                  {totalKasToSend.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                <div className="text-xs text-zinc-400">Total {tokenLabel}</div>
+                <div className={`text-xl font-bold mt-1 ${mode === 'krc20' ? 'text-violet-400' : 'text-emerald-400'}`}>
+                  {totalToSend.toLocaleString(undefined, { maximumFractionDigits: 8 })}
                 </div>
               </div>
 
               <div className="rounded-xl bg-zinc-950 border border-zinc-800/80 p-3.5 col-span-2 flex justify-between items-center">
                 <div>
-                  <div className="text-xs text-zinc-400">Batch Structure</div>
+                  <div className="text-xs text-zinc-400">Signing Model</div>
                   <div className="text-xs font-semibold text-zinc-200 mt-0.5">
-                    {batches.length} Batch{batches.length === 1 ? '' : 'es'} (~{BATCH_SIZE} outputs/tx)
+                    {mode === 'kas'
+                      ? `${batches.length} Batch${batches.length === 1 ? '' : 'es'} — 1 approval each`
+                      : `${batches.length} Batch${batches.length === 1 ? '' : 'es'} — commit-reveal per recipient`}
                   </div>
                 </div>
-                <ShieldCheck className="h-5 w-5 text-zinc-500" />
+                {mode === 'krc20'
+                  ? <Coins className="h-5 w-5 text-violet-500" />
+                  : <ShieldCheck className="h-5 w-5 text-zinc-500" />}
               </div>
             </div>
+
+            {/* KRC-20 note */}
+            {mode === 'krc20' && (
+              <div className="rounded-xl bg-violet-950/20 border border-violet-800/30 p-3 text-xs text-violet-300 space-y-1">
+                <div className="font-semibold">How KRC-20 transfers work</div>
+                <div className="text-zinc-400 leading-relaxed">
+                  Each recipient gets a commit + reveal transaction pair. Approve once per batch — the wallet handles all commit-reveal pairs automatically.
+                </div>
+              </div>
+            )}
 
             {batches.length > 0 && (
               <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                 <div className="text-xs font-medium text-zinc-400">Batch Queue</div>
                 {batches.map((b, idx) => {
                   const status = batchStatuses[idx] || { status: 'pending' };
+                  const accentColor = mode === 'krc20' ? 'text-violet-400' : 'text-emerald-400';
+                  const explorerBase = mode === 'krc20'
+                    ? 'https://explorer.kaspa.org/txs/'
+                    : 'https://explorer.kaspa.org/txs/';
+
                   return (
                     <div
                       key={idx}
                       className="flex items-center justify-between rounded-xl bg-zinc-950 border border-zinc-800 p-3 text-xs"
                     >
                       <div>
-                        <div className="font-semibold text-zinc-200">Batch #{idx + 1} ({b.length} outputs)</div>
+                        <div className="font-semibold text-zinc-200">
+                          Batch #{idx + 1} ({b.length} {mode === 'krc20' ? 'transfers' : 'outputs'})
+                        </div>
                         {status.txId && (
                           <a
-                            href={`https://explorer.kaspa.org/txs/${status.txId}`}
+                            href={`${explorerBase}${status.txId}`}
                             target="_blank"
                             rel="noreferrer"
-                            className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1 mt-0.5"
+                            className={`text-[11px] ${accentColor} hover:underline flex items-center gap-1 mt-0.5`}
                           >
-                            Tx: {status.txId.slice(0, 12)}... <ExternalLink className="h-3 w-3" />
+                            Tx: {status.txId.slice(0, 12)}… <ExternalLink className="h-3 w-3" />
                           </a>
                         )}
                         {status.error && (
@@ -566,19 +860,17 @@ export default function Home() {
                           </span>
                         )}
                         {status.status === 'signing' && (
-                          <span className="text-amber-400 flex items-center gap-1.5">
+                          <span className={`${mode === 'krc20' ? 'text-violet-400' : 'text-amber-400'} flex items-center gap-1.5`}>
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             {status.signingProgress
-                              ? `Signing ${status.signingProgress}`
-                              : 'Approve in wallet'}
+                              ? (mode === 'krc20' ? `${status.signingProgress} done` : `Signing ${status.signingProgress}`)
+                              : (mode === 'krc20' ? 'Approve in wallet' : 'Approve in wallet')}
                           </span>
                         )}
                         {status.status === 'sent' && (
-                          <span className="text-emerald-400 flex items-center gap-1">
+                          <span className={`${accentColor} flex items-center gap-1`}>
                             <CheckCircle2 className="h-3.5 w-3.5" />
-                            {status.sentCount && status.sentCount > 1
-                              ? `${status.sentCount} sent`
-                              : 'Sent'}
+                            {status.sentCount && status.sentCount > 1 ? `${status.sentCount} sent` : 'Sent'}
                           </span>
                         )}
                         {status.status === 'failed' && (
@@ -594,21 +886,30 @@ export default function Home() {
             )}
 
             <button
-              disabled={isProcessing || parsedRecipients.length === 0}
+              disabled={
+                isProcessing ||
+                parsedRecipients.length === 0 ||
+                (mode === 'krc20' && !tokenInfo)
+              }
               onClick={handleExecuteDisperse}
               className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${
-                isProcessing || parsedRecipients.length === 0
+                isProcessing || parsedRecipients.length === 0 || (mode === 'krc20' && !tokenInfo)
                   ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-                  : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-lg shadow-emerald-500/20'
+                  : mode === 'krc20'
+                    ? 'bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-500/20'
+                    : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-lg shadow-emerald-500/20'
               }`}
             >
               {isProcessing ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Processing Batches...
+                  <Loader2 className="h-4 w-4 animate-spin" /> Processing…
                 </>
               ) : (
                 <>
-                  <Send className="h-4 w-4" /> Execute Disperse
+                  <Send className="h-4 w-4" />
+                  {mode === 'krc20'
+                    ? (tokenInfo ? `Disperse ${tokenInfo.tick}` : 'Select Token First')
+                    : 'Execute Disperse'}
                 </>
               )}
             </button>
@@ -616,7 +917,7 @@ export default function Home() {
         </section>
       </main>
 
-      {/* WALLET CONNECT MODAL */}
+      {/* WALLET MODAL */}
       {isWalletModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-zinc-900 border border-zinc-800 p-6 text-white shadow-2xl">
@@ -625,17 +926,18 @@ export default function Home() {
                 <Wallet className="h-5 w-5 text-emerald-400" />
                 <h2 className="text-lg font-semibold">Select Kaspa Wallet</h2>
               </div>
-              <button
-                onClick={() => setIsWalletModalOpen(false)}
-                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white"
-              >
+              <button onClick={() => setIsWalletModalOpen(false)} className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             {walletError && (
-              <div className="mt-4 rounded-lg bg-red-950/50 border border-red-800/60 p-3 text-xs text-red-300">
-                {walletError}
+              <div className="mt-4 rounded-lg bg-red-950/50 border border-red-800/60 p-3 text-xs text-red-300">{walletError}</div>
+            )}
+
+            {mode === 'krc20' && (
+              <div className="mt-4 rounded-lg bg-violet-950/30 border border-violet-800/40 p-3 text-xs text-violet-300">
+                KRC-20 batch transfers require <span className="font-semibold">KasWare Wallet</span> (latest version).
               </div>
             )}
 
@@ -670,9 +972,7 @@ export default function Home() {
                         <div className="text-sm font-medium text-zinc-100">{wallet.name}</div>
                         <span className="text-[11px] text-zinc-400">
                           {wallet.type === 'extension'
-                            ? isInstalled
-                              ? 'Browser Extension'
-                              : 'Not Installed'
+                            ? isInstalled ? 'Browser Extension' : 'Not Installed'
                             : `${wallet.type.toUpperCase()} Wallet`}
                         </span>
                       </div>

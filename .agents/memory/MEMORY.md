@@ -1,1 +1,2 @@
 - [Kaspa tx building without kaspa-wasm](kaspa-wasm-build-tx.md) — Generator/createTransactions fail for manual UTXOs; use pure-JS bech32 decoder + manual SignableTransaction JSON instead.
+- [KRC-20 disperse via KasWare native API](krc20-kasware-api.md) — Use kasware.krc20BatchTransferTransaction() for KRC-20 bulk sends; no server-side work needed.
