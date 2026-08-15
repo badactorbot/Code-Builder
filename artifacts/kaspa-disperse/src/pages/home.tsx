@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Wallet, Upload, Send, CheckCircle2, AlertCircle, X, Download,
-  ExternalLink, Loader2, FileText, Layers, ShieldCheck, Coins, Search,
+  ExternalLink, Loader2, FileText, Layers, ShieldCheck, Coins, RefreshCw,
 } from 'lucide-react';
 
 // ==========================================
@@ -108,10 +108,11 @@ export default function Home() {
   const [mode, setMode] = useState<'kas' | 'krc20'>('kas');
 
   // ── KRC-20 token state ────────────────────────────────────────────────
-  const [tokenTicker, setTokenTicker] = useState('');
+  const [walletTokens, setWalletTokens] = useState<{ tick: string; rawBalance: bigint }[]>([]);
+  const [walletTokensLoading, setWalletTokensLoading] = useState(false);
+  const [walletTokensError, setWalletTokensError] = useState('');
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
-  const [tokenInfoLoading, setTokenInfoLoading] = useState(false);
-  const [tokenInfoError, setTokenInfoError] = useState('');
+  const [tokenSelectLoading, setTokenSelectLoading] = useState(false);
   const [tokenWalletBalance, setTokenWalletBalance] = useState<string | null>(null);
 
   // ── Recipients / batches ──────────────────────────────────────────────
@@ -140,60 +141,66 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [isWalletModalOpen]);
 
-  // ── Fetch KRC-20 token info from Kasplex ─────────────────────────────
-  const fetchTokenInfo = useCallback(async (tick: string) => {
-    const upper = tick.trim().toUpperCase();
-    if (!upper) {
-      setTokenInfo(null);
-      setTokenInfoError('');
-      setTokenWalletBalance(null);
+  // ── Fetch all KRC-20 tokens held by the connected wallet ─────────────
+  const fetchWalletTokens = useCallback(async (provider: any) => {
+    if (!provider || typeof provider.getKRC20Balance !== 'function') {
+      setWalletTokensError('Your wallet does not support KRC-20 balance lookup.');
       return;
     }
-
-    setTokenInfoLoading(true);
-    setTokenInfoError('');
+    setWalletTokensLoading(true);
+    setWalletTokensError('');
+    setWalletTokens([]);
     setTokenInfo(null);
     setTokenWalletBalance(null);
-
     try {
-      const res = await fetch(`${KASPLEX_API}/krc20/token/${encodeURIComponent(upper)}`);
+      const balances: any[] = await provider.getKRC20Balance();
+      const parsed = (balances ?? [])
+        .filter((b: any) => b.tick && BigInt(b.balance ?? '0') > 0n)
+        .map((b: any) => ({ tick: String(b.tick).toUpperCase(), rawBalance: BigInt(b.balance ?? '0') }));
+      setWalletTokens(parsed);
+      if (parsed.length === 0) setWalletTokensError('No KRC-20 tokens found in this wallet.');
+    } catch {
+      setWalletTokensError('Failed to load KRC-20 tokens from wallet.');
+    } finally {
+      setWalletTokensLoading(false);
+    }
+  }, []);
+
+  // ── Select a token: fetch its decimal info from Kasplex ──────────────
+  const handleSelectToken = useCallback(async (tick: string, rawBalance: bigint) => {
+    setTokenSelectLoading(true);
+    setTokenInfo(null);
+    setTokenWalletBalance(null);
+    try {
+      const res = await fetch(`${KASPLEX_API}/krc20/token/${encodeURIComponent(tick)}`);
       const data = await res.json();
       const info = data?.result?.[0];
-      if (!info) {
-        setTokenInfoError(`Token "${upper}" not found on Kasplex`);
-        setTokenInfoLoading(false);
-        return;
-      }
-      setTokenInfo({ tick: info.tick, dec: info.dec ?? '8', state: info.state ?? '' });
-
-      // Fetch wallet KRC-20 balance if connected
-      if (account?.provider && typeof account.provider.getKRC20Balance === 'function') {
-        try {
-          const balances: any[] = await account.provider.getKRC20Balance();
-          const found = balances.find((b: any) => b.tick?.toUpperCase() === upper);
-          if (found) {
-            const raw = BigInt(found.balance ?? '0');
-            const dec = parseInt(info.dec ?? '8', 10);
-            const whole = Number(raw) / Math.pow(10, dec);
-            setTokenWalletBalance(whole.toLocaleString(undefined, { maximumFractionDigits: dec }));
-          } else {
-            setTokenWalletBalance('0');
-          }
-        } catch {
-          setTokenWalletBalance(null);
-        }
-      }
+      const dec = info?.dec ?? '8';
+      const state = info?.state ?? '';
+      setTokenInfo({ tick, dec, state });
+      const decNum = parseInt(dec, 10);
+      const whole = Number(rawBalance) / Math.pow(10, decNum);
+      setTokenWalletBalance(whole.toLocaleString(undefined, { maximumFractionDigits: decNum }));
     } catch {
-      setTokenInfoError('Failed to fetch token info from Kasplex');
+      // Still allow selection; default 8 decimals
+      setTokenInfo({ tick, dec: '8', state: '' });
+      const whole = Number(rawBalance) / 1e8;
+      setTokenWalletBalance(whole.toLocaleString(undefined, { maximumFractionDigits: 8 }));
     } finally {
-      setTokenInfoLoading(false);
+      setTokenSelectLoading(false);
     }
-  }, [account]);
+  }, []);
 
-  // Re-fetch balance when wallet connects while in KRC-20 mode
+  // ── Auto-fetch wallet tokens when switching to KRC-20 mode or connecting ─
   useEffect(() => {
-    if (mode === 'krc20' && tokenTicker && account) {
-      fetchTokenInfo(tokenTicker);
+    if (mode === 'krc20' && account?.provider) {
+      fetchWalletTokens(account.provider);
+    }
+    if (mode !== 'krc20') {
+      setWalletTokens([]);
+      setWalletTokensError('');
+      setTokenInfo(null);
+      setTokenWalletBalance(null);
     }
   }, [account, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -282,13 +289,12 @@ export default function Home() {
   };
 
   const totalToSend = parsedRecipients.reduce((sum, r) => sum + r.amount, 0);
-  const tokenLabel = mode === 'kas' ? 'KAS' : ((tokenInfo?.tick ?? tokenTicker.toUpperCase()) || 'TOKEN');
+  const tokenLabel = mode === 'kas' ? 'KAS' : (tokenInfo?.tick || 'TOKEN');
 
   // ── Switch mode ───────────────────────────────────────────────────────
   const handleModeSwitch = (newMode: 'kas' | 'krc20') => {
     setMode(newMode);
     setTokenInfo(null);
-    setTokenInfoError('');
     setTokenWalletBalance(null);
     // Re-parse to rebuild batches (same data, same logic)
     if (rawInput) handleParseInput(rawInput);
@@ -659,61 +665,102 @@ export default function Home() {
           {/* KRC-20 TOKEN SELECTOR */}
           {mode === 'krc20' && (
             <div className="rounded-2xl bg-zinc-900 border border-zinc-800 p-5 shadow-xl space-y-4">
-              <label className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
-                <Coins className="h-4 w-4 text-violet-400" />
-                Token Ticker
-              </label>
-
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={tokenTicker}
-                  onChange={(e) => setTokenTicker(e.target.value.toUpperCase())}
-                  placeholder="e.g. NACHO"
-                  maxLength={20}
-                  className="flex-1 rounded-xl bg-zinc-950 border border-zinc-800 px-4 py-2.5 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 uppercase tracking-wider transition"
-                />
-                <button
-                  onClick={() => fetchTokenInfo(tokenTicker)}
-                  disabled={!tokenTicker || tokenInfoLoading}
-                  className="flex items-center gap-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-zinc-800 disabled:text-zinc-500 px-4 py-2.5 text-sm font-semibold text-white transition"
-                >
-                  {tokenInfoLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Search className="h-4 w-4" />
-                  )}
-                  Look up
-                </button>
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
+                  <Coins className="h-4 w-4 text-violet-400" />
+                  Select Token
+                </label>
+                {account?.provider && (
+                  <button
+                    onClick={() => fetchWalletTokens(account.provider)}
+                    disabled={walletTokensLoading}
+                    className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-violet-300 transition disabled:opacity-50"
+                    title="Refresh token list"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${walletTokensLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                )}
               </div>
 
-              {tokenInfoError && (
-                <div className="rounded-xl bg-red-950/40 border border-red-800/60 p-3 text-xs text-red-300 flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 shrink-0" />
-                  {tokenInfoError}
+              {/* Not connected */}
+              {!account && (
+                <div className="rounded-xl bg-zinc-950 border border-zinc-800 p-6 text-center text-sm text-zinc-500">
+                  Connect your wallet to see your KRC-20 tokens
                 </div>
               )}
 
-              {tokenInfo && !tokenInfoError && (
-                <div className="rounded-xl bg-violet-950/30 border border-violet-800/40 p-4 space-y-2">
-                  <div className="flex items-center justify-between">
+              {/* Loading */}
+              {account && walletTokensLoading && (
+                <div className="flex items-center justify-center gap-2 py-6 text-sm text-zinc-400">
+                  <Loader2 className="h-4 w-4 animate-spin text-violet-400" />
+                  Loading tokens from wallet…
+                </div>
+              )}
+
+              {/* Error */}
+              {account && !walletTokensLoading && walletTokensError && (
+                <div className="rounded-xl bg-red-950/40 border border-red-800/60 p-3 text-xs text-red-300 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  {walletTokensError}
+                </div>
+              )}
+
+              {/* Token grid */}
+              {account && !walletTokensLoading && walletTokens.length > 0 && (
+                <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+                  {walletTokens.map(({ tick, rawBalance }) => {
+                    const isSelected = tokenInfo?.tick === tick;
+                    const displayBalance = (Number(rawBalance) / 1e8).toLocaleString(undefined, { maximumFractionDigits: 4 });
+                    return (
+                      <button
+                        key={tick}
+                        onClick={() => !tokenSelectLoading && handleSelectToken(tick, rawBalance)}
+                        disabled={tokenSelectLoading}
+                        className={`text-left rounded-xl border p-3 transition ${
+                          isSelected
+                            ? 'border-violet-500 bg-violet-950/40 ring-1 ring-violet-500/40'
+                            : 'border-zinc-800 bg-zinc-950 hover:border-violet-700/60 hover:bg-violet-950/20'
+                        } ${tokenSelectLoading ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-sm text-zinc-100 tracking-wide">{tick}</span>
+                          {isSelected && <CheckCircle2 className="h-4 w-4 text-violet-400 shrink-0" />}
+                        </div>
+                        <div className="text-[11px] text-zinc-400 truncate">{displayBalance}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Selected token info */}
+              {tokenSelectLoading && (
+                <div className="flex items-center gap-2 text-xs text-zinc-400">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-400" />
+                  Loading token details…
+                </div>
+              )}
+
+              {tokenInfo && !tokenSelectLoading && (
+                <div className="rounded-xl bg-violet-950/30 border border-violet-800/40 p-3 flex items-center justify-between">
+                  <div className="space-y-0.5">
                     <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-violet-400" />
-                      <span className="font-bold text-violet-200">{tokenInfo.tick}</span>
-                      <span className="text-[10px] bg-violet-900/60 border border-violet-700/40 text-violet-400 px-2 py-0.5 rounded-full uppercase">
-                        {tokenInfo.state}
-                      </span>
+                      <CheckCircle2 className="h-3.5 w-3.5 text-violet-400" />
+                      <span className="text-sm font-bold text-violet-200">{tokenInfo.tick}</span>
+                      {tokenInfo.state && (
+                        <span className="text-[10px] bg-violet-900/60 border border-violet-700/40 text-violet-400 px-2 py-0.5 rounded-full uppercase">
+                          {tokenInfo.state}
+                        </span>
+                      )}
                     </div>
-                    <span className="text-xs text-zinc-400">Decimals: {tokenInfo.dec}</span>
+                    {tokenWalletBalance !== null && (
+                      <div className="text-xs text-zinc-400 pl-5.5">
+                        Balance: <span className="text-violet-300 font-semibold">{tokenWalletBalance} {tokenInfo.tick}</span>
+                      </div>
+                    )}
                   </div>
-                  {tokenWalletBalance !== null && (
-                    <div className="text-xs text-zinc-400">
-                      Wallet balance: <span className="text-violet-300 font-semibold">{tokenWalletBalance} {tokenInfo.tick}</span>
-                    </div>
-                  )}
-                  <div className="text-xs text-zinc-500">
-                    Enter amounts as whole {tokenInfo.tick} units (e.g. 1.5 = 1.5 {tokenInfo.tick})
-                  </div>
+                  <div className="text-xs text-zinc-500">dec: {tokenInfo.dec}</div>
                 </div>
               )}
             </div>
