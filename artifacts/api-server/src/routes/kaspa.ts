@@ -253,18 +253,26 @@ router.post('/push-tx', async (req, res) => {
     // Parse the SignableTransaction JSON from the wallet
     const tx = typeof signedTxJson === 'string' ? JSON.parse(signedTxJson) : signedTxJson;
 
+    // Helper: resolve previousOutpoint from a signed input, handling both
+    // camelCase (kaspa-wasm serializeToSafeJSON) and snake_case variants that
+    // different wallet versions may emit.
+    const resolveOutpoint = (inp: any) => {
+      const op = inp.previousOutpoint ?? inp.previous_outpoint ?? inp.outpoint ?? {};
+      const txId: string =
+        op.transactionId ?? op.transaction_id ?? op.transactionId ?? op.txId ?? op.txid ?? '';
+      const idx: number = Number(op.index ?? op.outputIndex ?? 0);
+      return { transactionId: txId, index: idx };
+    };
+
     // Map to Kaspa REST API SubmitTransactionRequest format.
     // Handles two source formats:
     //   - signKaspaTransaction format: outputs have "amount" (number)
     //   - signPskt / kaspa-wasm format: outputs have "value" (BigInt string)
-    // Both: scriptPublicKey uses "script" key internally; REST API needs "scriptPublicKey".
+    // Both: scriptPublicKey uses "script" key; REST API expects "scriptPublicKey".
     const submitTx = {
       version: tx.version ?? 0,
       inputs: (tx.inputs ?? []).map((inp: any) => ({
-        previousOutpoint: {
-          transactionId: inp.previousOutpoint?.transactionId,
-          index: inp.previousOutpoint?.index,
-        },
+        previousOutpoint: resolveOutpoint(inp),
         signatureScript: inp.signatureScript ?? '',
         sequence: Number(inp.sequence ?? 0),
         sigOpCount: inp.sigOpCount ?? 1,
@@ -282,6 +290,19 @@ router.post('/push-tx', async (req, res) => {
       subnetworkId: tx.subnetworkId ?? '0000000000000000000000000000000000000000',
     };
 
+    // Validate: every input must have a non-empty transactionId before we submit
+    const badInput = submitTx.inputs.findIndex((i) => !i.previousOutpoint.transactionId);
+    if (badInput !== -1) {
+      // Log the raw signed input so we can see what field names the wallet used
+      const rawInp = (tx.inputs ?? [])[badInput];
+      console.error('[push-tx] input %d missing transactionId; raw keys:', badInput, Object.keys(rawInp ?? {}));
+      console.error('[push-tx] raw previousOutpoint keys:', Object.keys(rawInp?.previousOutpoint ?? rawInp?.previous_outpoint ?? rawInp?.outpoint ?? {}));
+      throw new Error(
+        `Signed transaction input ${badInput} is missing transactionId — wallet returned unexpected format. ` +
+        `Raw outpoint keys: ${Object.keys(rawInp?.previousOutpoint ?? rawInp?.previous_outpoint ?? rawInp?.outpoint ?? {}).join(', ')}`,
+      );
+    }
+
     const submitRes = await fetch(`${apiBase}/transactions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -291,6 +312,8 @@ router.post('/push-tx', async (req, res) => {
     const submitBody = await submitRes.json() as any;
 
     if (!submitRes.ok) {
+      // Log what we submitted to help debug format issues
+      console.error('[push-tx] Kaspa API rejected. First input outpoint:', submitTx.inputs[0]?.previousOutpoint);
       throw new Error(submitBody?.detail ?? submitBody?.error ?? `Kaspa node rejected transaction (${submitRes.status})`);
     }
 

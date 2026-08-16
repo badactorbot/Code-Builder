@@ -207,16 +207,32 @@ router.post('/build-kcc20-transfer', async (req, res) => {
     }
     const kasUtxos = await kasResp.json() as any[];
 
-    // Pick the KAS UTXO with the most KAS that exceeds the fee
+    // Prefer a single UTXO large enough for the fee (simplest transaction).
+    // If none qualifies, combine the largest UTXOs until we have enough.
     const sortedKas = [...kasUtxos].sort((a, b) => {
       const diff = BigInt(b.utxoEntry?.amount ?? 0) - BigInt(a.utxoEntry?.amount ?? 0);
       return diff > 0n ? 1 : diff < 0n ? -1 : 0;
     });
-    const feeUtxo = sortedKas.find((u: any) => BigInt(u.utxoEntry?.amount ?? 0) >= KCC20_FEE_SOMPI);
-    if (!feeUtxo) {
-      return res.status(400).json({
-        error: `Insufficient KAS for fee — need ≥${Number(KCC20_FEE_SOMPI) / 1e8} KAS (${KCC20_FEE_SOMPI} sompi)`,
-      });
+
+    let feeUtxos: any[] = [];
+    let feeTotal = 0n;
+
+    const singleFeeUtxo = sortedKas.find((u: any) => BigInt(u.utxoEntry?.amount ?? 0) >= KCC20_FEE_SOMPI);
+    if (singleFeeUtxo) {
+      feeUtxos = [singleFeeUtxo];
+      feeTotal = BigInt(singleFeeUtxo.utxoEntry?.amount ?? 0);
+    } else {
+      // Combine multiple UTXOs until we cover the fee
+      for (const u of sortedKas) {
+        feeUtxos.push(u);
+        feeTotal += BigInt(u.utxoEntry?.amount ?? 0);
+        if (feeTotal >= KCC20_FEE_SOMPI) break;
+      }
+      if (feeTotal < KCC20_FEE_SOMPI) {
+        return res.status(400).json({
+          error: `Insufficient KAS for fee — need ≥${Number(KCC20_FEE_SOMPI) / 1e8} KAS, have ${Number(feeTotal) / 1e8} KAS`,
+        });
+      }
     }
 
     // ── 6. Get blockDaaScore for KRON UTXOs from Kaspa tx API ─────────────
@@ -262,8 +278,7 @@ router.post('/build-kcc20-transfer', async (req, res) => {
 
     // ── 9. KAS change back to sender ──────────────────────────────────────
     const senderP2pkScript = '20' + Buffer.from(senderPubkey).toString('hex') + 'ac';
-    const kasAmount = BigInt(feeUtxo.utxoEntry?.amount ?? 0);
-    const kasChange = kasAmount - KCC20_FEE_SOMPI;
+    const kasChange = feeTotal - KCC20_FEE_SOMPI;
 
     // ── 10. Assemble Transaction JSON (kaspa-wasm serializeToSafeJSON format) ─
     // This format is what kasware.signPskt expects.
@@ -291,25 +306,27 @@ router.post('/build-kcc20-transfer', async (req, res) => {
       });
     }
 
-    // KAS fee input (regular P2PK — no redeemScript)
-    const kasSpk = feeUtxo.utxoEntry?.scriptPublicKey;
-    inputs.push({
-      previousOutpoint: {
-        transactionId: feeUtxo.outpoint?.transactionId ?? feeUtxo.transactionId,
-        index: feeUtxo.outpoint?.index ?? feeUtxo.index,
-      },
-      signatureScript: '',
-      sequence: '0',
-      sigOpCount: 1,
-      utxoEntry: {
-        amount: String(feeUtxo.utxoEntry?.amount ?? 0),
-        scriptPublicKey: typeof kasSpk === 'string'
-          ? { version: 0, script: kasSpk }
-          : { version: kasSpk?.version ?? 0, script: kasSpk?.scriptPublicKey ?? kasSpk?.script ?? '' },
-        blockDaaScore: String(feeUtxo.utxoEntry?.blockDaaScore ?? 0),
-        isCoinbase: feeUtxo.utxoEntry?.isCoinbase ?? false,
-      },
-    });
+    // KAS fee inputs (regular P2PK — no redeemScript; may be multiple)
+    for (const fu of feeUtxos) {
+      const kasSpk = fu.utxoEntry?.scriptPublicKey;
+      inputs.push({
+        previousOutpoint: {
+          transactionId: fu.outpoint?.transactionId ?? fu.transactionId ?? '',
+          index: fu.outpoint?.index ?? fu.index ?? 0,
+        },
+        signatureScript: '',
+        sequence: '0',
+        sigOpCount: 1,
+        utxoEntry: {
+          amount: String(fu.utxoEntry?.amount ?? 0),
+          scriptPublicKey: typeof kasSpk === 'string'
+            ? { version: 0, script: kasSpk }
+            : { version: kasSpk?.version ?? 0, script: kasSpk?.scriptPublicKey ?? kasSpk?.script ?? '' },
+          blockDaaScore: String(fu.utxoEntry?.blockDaaScore ?? 0),
+          isCoinbase: fu.utxoEntry?.isCoinbase ?? false,
+        },
+      });
+    }
 
     const outputs: any[] = [
       // Recipient KRON covenant outputs
@@ -327,7 +344,7 @@ router.post('/build-kcc20-transfer', async (req, res) => {
       });
     }
 
-    // KAS change output (always include to return KAS)
+    // KAS change output (always include to return KAS minus fee)
     if (kasChange > 0n) {
       outputs.push({
         value: String(kasChange),

@@ -1105,8 +1105,9 @@ export default function Home() {
                 <div className="text-xs font-medium text-zinc-400">Batch Queue</div>
                 {batches.map((b, idx) => {
                   const status = batchStatuses[idx] || { status: 'pending' };
+                  const isKcc20 = mode === 'krc20' && tokenInfo?.state === 'kcc-20';
                   const accentColor = mode === 'krc20' ? 'text-violet-400' : 'text-emerald-400';
-                  const explorerBase = mode === 'krc20'
+                  const explorerBase = isKcc20
                     ? 'https://explorer.kaspa.org/txs/'
                     : 'https://explorer.kaspa.org/txs/';
 
@@ -1126,7 +1127,8 @@ export default function Home() {
                             rel="noreferrer"
                             className={`text-[11px] ${accentColor} hover:underline flex items-center gap-1 mt-0.5`}
                           >
-                            Tx: {status.txId.slice(0, 12)}… <ExternalLink className="h-3 w-3" />
+                            {isKcc20 ? 'View on Kaspa explorer' : `Tx: ${status.txId.slice(0, 12)}…`}
+                            <ExternalLink className="h-3 w-3" />
                           </a>
                         )}
                         {status.error && (
