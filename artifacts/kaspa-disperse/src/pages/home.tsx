@@ -182,14 +182,50 @@ export default function Home() {
       newStatuses[i] = { status: 'signing', txId: '' };
       setStatuses([...newStatuses]);
 
-      try {
-        const sompi = Math.round(amount * 1e8);
-        const raw = await provider.sendKaspa(address, sompi);
-        const txId = typeof raw === 'string' ? raw : (raw?.txId ?? raw?.id ?? '');
+      // Kaspa rejects a tx that spends unconfirmed change from the previous tx
+      // ("orphan disallowed"). Retry up to 5× with increasing waits to let the
+      // previous transaction settle into the DAG (~1 block per second).
+      const MAX_RETRIES = 5;
+      let lastErr: any = null;
+      let txId = '';
+      let succeeded = false;
+
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        if (attempt > 0) {
+          // 2 s, 4 s, 6 s, 8 s — enough for the previous UTXO to confirm
+          const waitMs = attempt * 2000;
+          newStatuses[i] = {
+            status: 'signing',
+            txId: '',
+            error: `Orphan retry ${attempt}/${MAX_RETRIES - 1} — waiting ${waitMs / 1000}s…`,
+          };
+          setStatuses([...newStatuses]);
+          await new Promise((res) => setTimeout(res, waitMs));
+          newStatuses[i] = { status: 'signing', txId: '' };
+          setStatuses([...newStatuses]);
+        }
+
+        try {
+          const sompi = Math.round(amount * 1e8);
+          const raw = await provider.sendKaspa(address, sompi);
+          txId = typeof raw === 'string' ? raw : (raw?.txId ?? raw?.id ?? '');
+          succeeded = true;
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          const msg: string = err?.message ?? '';
+          // Only retry on orphan errors; surface anything else immediately
+          if (!msg.toLowerCase().includes('orphan')) break;
+        }
+      }
+
+      if (succeeded) {
         newStatuses[i] = { status: 'sent', txId };
         setStatuses([...newStatuses]);
-      } catch (err: any) {
-        newStatuses[i] = { status: 'failed', txId: '', error: err?.message ?? 'Rejected' };
+        // Brief pause between sends to let the wallet's UTXO state settle
+        if (i < recipients.length - 1) await new Promise((res) => setTimeout(res, 1500));
+      } else {
+        newStatuses[i] = { status: 'failed', txId: '', error: lastErr?.message ?? 'Rejected' };
         setStatuses([...newStatuses]);
         setIsProcessing(false);
         return;
