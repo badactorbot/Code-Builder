@@ -1,2 +1,3 @@
 - [Kaspa tx building without kaspa-wasm](kaspa-wasm-build-tx.md) — Generator/createTransactions fail for manual UTXOs; use pure-JS bech32 decoder + manual SignableTransaction JSON instead.
 - [KRC-20 disperse via KasWare native API](krc20-kasware-api.md) — Use kasware.krc20BatchTransferTransaction() for KRC-20 bulk sends; no server-side work needed.
+- [KCC-20 covenant dispersal](kcc20-covenant-dispersal.md) — Full implementation: blake2b via @noble/hashes/blake2.js, signPskt format differs from signKaspaTransaction, Kaspa tx API field is accepting_block_blue_score.

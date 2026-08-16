@@ -253,9 +253,11 @@ router.post('/push-tx', async (req, res) => {
     // Parse the SignableTransaction JSON from the wallet
     const tx = typeof signedTxJson === 'string' ? JSON.parse(signedTxJson) : signedTxJson;
 
-    // Map to Kaspa REST API SubmitTransactionRequest format:
-    // - Strip the 'utxo' field from inputs (signing metadata, not needed for broadcast)
-    // - Rename scriptPublicKey.script → scriptPublicKey.scriptPublicKey (REST API key name)
+    // Map to Kaspa REST API SubmitTransactionRequest format.
+    // Handles two source formats:
+    //   - signKaspaTransaction format: outputs have "amount" (number)
+    //   - signPskt / kaspa-wasm format: outputs have "value" (BigInt string)
+    // Both: scriptPublicKey uses "script" key internally; REST API needs "scriptPublicKey".
     const submitTx = {
       version: tx.version ?? 0,
       inputs: (tx.inputs ?? []).map((inp: any) => ({
@@ -264,18 +266,19 @@ router.post('/push-tx', async (req, res) => {
           index: inp.previousOutpoint?.index,
         },
         signatureScript: inp.signatureScript ?? '',
-        sequence: inp.sequence ?? 0,
+        sequence: Number(inp.sequence ?? 0),
         sigOpCount: inp.sigOpCount ?? 1,
       })),
       outputs: (tx.outputs ?? []).map((out: any) => ({
-        amount: out.amount,
+        // "amount" (signKaspaTransaction) or "value" (kaspa-wasm/signPskt) — accept both
+        amount: Number(out.amount ?? out.value ?? 0),
         scriptPublicKey: {
           version: out.scriptPublicKey?.version ?? 0,
-          // Our build-tx uses 'script' key; REST API expects 'scriptPublicKey'
+          // Our build-tx uses 'script'; REST API expects 'scriptPublicKey'
           scriptPublicKey: out.scriptPublicKey?.scriptPublicKey ?? out.scriptPublicKey?.script ?? '',
         },
       })),
-      lockTime: tx.lockTime ?? 0,
+      lockTime: Number(tx.lockTime ?? 0),
       subnetworkId: tx.subnetworkId ?? '0000000000000000000000000000000000000000',
     };
 

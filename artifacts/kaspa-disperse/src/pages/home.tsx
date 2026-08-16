@@ -385,30 +385,32 @@ export default function Home() {
     if (!account) { setIsWalletModalOpen(true); return; }
     if (batches.length === 0) return;
 
-    // KRC-20 mode validation
+    // KRC-20 / KCC-20 mode validation
     if (mode === 'krc20') {
       if (!tokenInfo) {
-        alert('Please enter and verify a valid KRC-20 token ticker first.');
+        alert('Please enter and verify a valid token ticker first.');
         return;
       }
       if (tokenInfo.state === 'kcc-20') {
-        alert(
-          `${tokenInfo.tick} is a KCC-20 token (covenant-based), not KRC-20.\n\n` +
-          `KCC-20 uses a different on-chain protocol — the KRC-20 commit-reveal API cannot transfer it. ` +
-          `If you proceed, only small KAS fees will leave your wallet; no ${tokenInfo.tick} will reach your recipients.\n\n` +
-          `KCC-20 dispersal is not yet supported.`
-        );
-        return;
-      }
-      if (typeof account.provider?.krc20BatchTransferTransaction !== 'function') {
-        alert('Your connected wallet does not support KRC-20 batch transfers. Please use KasWare wallet (latest version).');
-        return;
+        // KCC-20: use signPskt covenant path — wallet must support it
+        if (typeof account.provider?.signPskt !== 'function') {
+          alert('Your connected wallet does not support KCC-20 covenant transfers (signPskt). Please use KasWare wallet (latest version).');
+          return;
+        }
+      } else {
+        // KRC-20: use krc20BatchTransferTransaction path
+        if (typeof account.provider?.krc20BatchTransferTransaction !== 'function') {
+          alert('Your connected wallet does not support KRC-20 batch transfers. Please use KasWare wallet (latest version).');
+          return;
+        }
       }
     }
 
     setIsProcessing(true);
 
-    if (mode === 'krc20') {
+    if (mode === 'krc20' && tokenInfo?.state === 'kcc-20') {
+      await executeKcc20Disperse();
+    } else if (mode === 'krc20') {
       await executeKrc20Disperse();
     } else {
       await executeKasDisperse();
@@ -498,6 +500,122 @@ export default function Home() {
             status: 'failed',
             txId: '',
             error: err?.message ?? 'Batch transfer rejected or failed',
+          };
+          return copy;
+        });
+        setIsProcessing(false);
+        return;
+      }
+    }
+  };
+
+  // ── KCC-20 execution: covenant-based transfer via kasware.signPskt ──────
+  // Batches at most 3 recipients per transaction (covenant maxOuts = 4 incl. change).
+  const executeKcc20Disperse = async () => {
+    if (!account || !tokenInfo) return;
+    const provider = account.provider;
+
+    const KCC20_BATCH_SIZE = 3;
+
+    // Re-batch parsedRecipients with KCC-20 batch size
+    const kcc20Batches: Recipient[][] = [];
+    for (let i = 0; i < parsedRecipients.length; i += KCC20_BATCH_SIZE) {
+      kcc20Batches.push(parsedRecipients.slice(i, i + KCC20_BATCH_SIZE));
+    }
+
+    // Resize batch statuses to match KCC-20 batches
+    setBatchStatuses(kcc20Batches.map(() => ({ status: 'pending', txId: '' })));
+
+    for (let i = 0; i < kcc20Batches.length; i++) {
+      const batch = kcc20Batches[i];
+
+      setBatchStatuses((prev) => {
+        const copy = [...prev];
+        copy[i] = { status: 'building', txId: '' };
+        return copy;
+      });
+
+      try {
+        // ── 1. Build the covenant transaction server-side ──────────────────
+        const buildRes = await fetch('/api/kron/build-kcc20-transfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            senderAddress: account.address,
+            // For KCC-20 (dec=0): amount is in whole token units — send as integer string
+            recipients: batch.map((r) => ({
+              address: r.address,
+              amount: Math.round(r.amount).toString(),
+            })),
+            tick: tokenInfo.tick,
+          }),
+        });
+
+        const buildBody = await buildRes.json();
+        if (!buildRes.ok) throw new Error(buildBody.error ?? `Server error ${buildRes.status}`);
+
+        const { txJsonString, inputIndicesToSign } = buildBody as {
+          txJsonString: string;
+          inputIndicesToSign: number[];
+          fee: string;
+          totalAmount: string;
+        };
+
+        // ── 2. Sign with KasWare signPskt ─────────────────────────────────
+        setBatchStatuses((prev) => {
+          const copy = [...prev];
+          copy[i] = { status: 'signing', txId: '', signingProgress: 'Approve in wallet…' };
+          return copy;
+        });
+
+        const signInputs = inputIndicesToSign.map((idx: number) => ({ index: idx, sighashType: 1 }));
+
+        let signedResult: any;
+        try {
+          signedResult = await provider.signPskt({
+            txJsonString,
+            options: { signInputs },
+          });
+        } catch (sigErr: any) {
+          throw new Error(sigErr?.message ?? 'Wallet rejected the signing request');
+        }
+
+        // signPskt may return a string or an object with txJsonString
+        const signedJson: string =
+          typeof signedResult === 'string'
+            ? signedResult
+            : (signedResult?.txJsonString ?? JSON.stringify(signedResult));
+
+        // ── 3. Broadcast ────────────────────────────────────────────────────
+        setBatchStatuses((prev) => {
+          const copy = [...prev];
+          copy[i] = { status: 'signing', txId: '', signingProgress: 'Broadcasting…' };
+          return copy;
+        });
+
+        const pushRes = await fetch('/api/kaspa/push-tx', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signedTxJson: signedJson }),
+        });
+
+        const pushBody = await pushRes.json();
+        if (!pushRes.ok) throw new Error(pushBody.error ?? `Broadcast error ${pushRes.status}`);
+
+        const txId: string = pushBody.txId ?? pushBody.transactionId ?? '';
+
+        setBatchStatuses((prev) => {
+          const copy = [...prev];
+          copy[i] = { status: 'sent', txId };
+          return copy;
+        });
+      } catch (err: any) {
+        setBatchStatuses((prev) => {
+          const copy = [...prev];
+          copy[i] = {
+            status: 'failed',
+            txId: '',
+            error: err?.message ?? 'KCC-20 transfer failed',
           };
           return copy;
         });
@@ -940,7 +1058,9 @@ export default function Home() {
                   <div className="text-xs font-semibold text-zinc-200 mt-0.5">
                     {mode === 'kas'
                       ? `${batches.length} Batch${batches.length === 1 ? '' : 'es'} — 1 approval each`
-                      : `${batches.length} Batch${batches.length === 1 ? '' : 'es'} — commit-reveal per recipient`}
+                      : tokenInfo?.state === 'kcc-20'
+                        ? `${Math.ceil(parsedRecipients.length / 3)} Batch${Math.ceil(parsedRecipients.length / 3) === 1 ? '' : 'es'} — 1 approval each (≤3 recipients/batch)`
+                        : `${batches.length} Batch${batches.length === 1 ? '' : 'es'} — commit-reveal per recipient`}
                   </div>
                 </div>
                 {mode === 'krc20'
@@ -954,12 +1074,12 @@ export default function Home() {
               <div className="rounded-xl bg-amber-950/30 border border-amber-700/50 p-3 text-xs text-amber-300 space-y-1">
                 <div className="font-semibold flex items-center gap-1.5">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                  KCC-20 token — dispersal not supported
+                  KCC-20 covenant token
                 </div>
                 <div className="text-amber-400/80 leading-relaxed">
-                  <strong>{tokenInfo.tick}</strong> uses the KCC-20 covenant protocol, which is different from KRC-20.
-                  The KRC-20 commit-reveal API cannot transfer it — only KAS fees would leave your wallet.
-                  KCC-20 dispersal support is not yet available.
+                  <strong>{tokenInfo.tick}</strong> uses the KCC-20 covenant protocol.
+                  Each batch (≤3 recipients) is a single transaction signed once in your wallet.
+                  A small KAS fee (~0.05 KAS/batch) covers the covenant transaction mass.
                 </div>
               </div>
             )}
