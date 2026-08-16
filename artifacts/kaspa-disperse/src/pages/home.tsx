@@ -616,6 +616,20 @@ export default function Home() {
             ? signedResult
             : (signedResult?.txJsonString ?? JSON.stringify(signedResult));
 
+        // Capture structure info for diagnostics shown in the UI if push-tx fails
+        let signedDiag = '';
+        try {
+          const parsed = JSON.parse(signedJson);
+          const root = parsed.transaction ?? parsed.tx ?? parsed;
+          const inp0 = (root.inputs ?? [])[0] ?? {};
+          const op0 = inp0.previousOutpoint ?? inp0.previous_outpoint ?? inp0.outpoint ?? inp0;
+          const inp1 = (root.inputs ?? [])[1] ?? {};
+          const op1 = inp1.previousOutpoint ?? inp1.previous_outpoint ?? inp1.outpoint ?? inp1;
+          signedDiag = `root_keys=[${Object.keys(parsed).join(',')}] ` +
+            `inp0_keys=[${Object.keys(inp0).join(',')}] op0_keys=[${Object.keys(op0).join(',')}] ` +
+            `inp1_keys=[${Object.keys(inp1).join(',')}] op1_keys=[${Object.keys(op1).join(',')}]`;
+        } catch { signedDiag = 'parse-failed'; }
+
         // ── 3. Broadcast ────────────────────────────────────────────────────
         setBatchStatuses((prev) => {
           const copy = [...prev];
@@ -630,7 +644,7 @@ export default function Home() {
         });
 
         const pushBody = await pushRes.json();
-        if (!pushRes.ok) throw new Error(pushBody.error ?? `Broadcast error ${pushRes.status}`);
+        if (!pushRes.ok) throw new Error((pushBody.error ?? `Broadcast error ${pushRes.status}`) + ` | diag: ${signedDiag}`);
 
         const txId: string = pushBody.txId ?? pushBody.transactionId ?? '';
 
