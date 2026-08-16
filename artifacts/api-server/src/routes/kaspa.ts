@@ -251,7 +251,25 @@ router.post('/push-tx', async (req, res) => {
     const apiBase = API_BASE[networkId] ?? API_BASE.mainnet;
 
     // Parse the SignableTransaction JSON from the wallet
-    const tx = typeof signedTxJson === 'string' ? JSON.parse(signedTxJson) : signedTxJson;
+    // DEBUG: log the raw structure so we can diagnose KasWare format issues
+    const rawStr = typeof signedTxJson === 'string' ? signedTxJson : JSON.stringify(signedTxJson);
+    const tx = JSON.parse(rawStr);
+
+    // Handle wrapped format: some wallet versions return { transaction: { inputs, outputs, ... } }
+    // instead of the flat kaspa-wasm serializeToSafeJSON format.
+    const txData: any = Array.isArray(tx.inputs) ? tx : (tx.transaction ?? tx);
+
+    // Log the exact field names present in the signed transaction (helps diagnose wallet format issues)
+    const topKeys = Object.keys(tx);
+    const inputCount = Array.isArray(txData.inputs) ? txData.inputs.length : '?';
+    console.log('[push-tx] top-level keys:', topKeys, '| resolved inputs:', inputCount);
+    if (Array.isArray(txData.inputs)) {
+      txData.inputs.forEach((inp: any, i: number) => {
+        const op = inp.previousOutpoint ?? inp.previous_outpoint ?? inp.outpoint;
+        const opKeys = op ? Object.keys(op) : [];
+        console.log(`[push-tx] input[${i}] keys:`, Object.keys(inp), '| outpoint keys:', opKeys, '| txId:', op?.transactionId ?? op?.transaction_id ?? op?.txId ?? '<missing>');
+      });
+    }
 
     // Helper: resolve previousOutpoint from a signed input, handling both
     // camelCase (kaspa-wasm serializeToSafeJSON) and snake_case variants that
@@ -270,14 +288,14 @@ router.post('/push-tx', async (req, res) => {
     //   - signPskt / kaspa-wasm format: outputs have "value" (BigInt string)
     // Both: scriptPublicKey uses "script" key; REST API expects "scriptPublicKey".
     const submitTx = {
-      version: tx.version ?? 0,
-      inputs: (tx.inputs ?? []).map((inp: any) => ({
+      version: txData.version ?? tx.version ?? 0,
+      inputs: (txData.inputs ?? tx.inputs ?? []).map((inp: any) => ({
         previousOutpoint: resolveOutpoint(inp),
         signatureScript: inp.signatureScript ?? '',
         sequence: Number(inp.sequence ?? 0),
         sigOpCount: inp.sigOpCount ?? 1,
       })),
-      outputs: (tx.outputs ?? []).map((out: any) => ({
+      outputs: (txData.outputs ?? tx.outputs ?? []).map((out: any) => ({
         // "amount" (signKaspaTransaction) or "value" (kaspa-wasm/signPskt) — accept both
         amount: Number(out.amount ?? out.value ?? 0),
         scriptPublicKey: {
@@ -286,8 +304,8 @@ router.post('/push-tx', async (req, res) => {
           scriptPublicKey: out.scriptPublicKey?.scriptPublicKey ?? out.scriptPublicKey?.script ?? '',
         },
       })),
-      lockTime: Number(tx.lockTime ?? 0),
-      subnetworkId: tx.subnetworkId ?? '0000000000000000000000000000000000000000',
+      lockTime: Number(txData.lockTime ?? tx.lockTime ?? 0),
+      subnetworkId: txData.subnetworkId ?? tx.subnetworkId ?? '0000000000000000000000000000000000000000',
     };
 
     // Validate: every input must have a non-empty transactionId before we submit

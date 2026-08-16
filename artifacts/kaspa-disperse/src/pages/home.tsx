@@ -580,6 +580,36 @@ export default function Home() {
           throw new Error(sigErr?.message ?? 'Wallet rejected the signing request');
         }
 
+        // DEBUG: log exactly what signPskt returned so we can diagnose format issues
+        console.log('[KCC20] signPskt raw result type:', typeof signedResult);
+        if (typeof signedResult === 'string') {
+          try {
+            const parsed = JSON.parse(signedResult);
+            console.log('[KCC20] signed JSON top-level keys:', Object.keys(parsed));
+            if (Array.isArray(parsed.inputs)) {
+              parsed.inputs.forEach((inp: any, i: number) => {
+                const op = inp.previousOutpoint ?? inp.previous_outpoint ?? inp.outpoint ?? {};
+                console.log(`[KCC20] input[${i}] outpoint keys:`, Object.keys(op), '| txId:', Object.values(op)[0]);
+              });
+            }
+          } catch { /* not parseable */ }
+        } else if (signedResult && typeof signedResult === 'object') {
+          console.log('[KCC20] signed result keys:', Object.keys(signedResult));
+          const str = signedResult?.txJsonString;
+          if (str) {
+            try {
+              const parsed = JSON.parse(str);
+              console.log('[KCC20] inner JSON top-level keys:', Object.keys(parsed));
+              if (Array.isArray(parsed.inputs)) {
+                parsed.inputs.forEach((inp: any, i: number) => {
+                  const op = inp.previousOutpoint ?? inp.previous_outpoint ?? inp.outpoint ?? {};
+                  console.log(`[KCC20] input[${i}] outpoint keys:`, Object.keys(op), '| txId:', Object.values(op)[0]);
+                });
+              }
+            } catch { /* not parseable */ }
+          }
+        }
+
         // signPskt may return a string or an object with txJsonString
         const signedJson: string =
           typeof signedResult === 'string'

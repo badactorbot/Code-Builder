@@ -79,6 +79,22 @@ Different from `signKaspaTransaction` format. Uses kaspa-wasm `Transaction.seria
 - Transaction DAA score: `accepting_block_blue_score` (NOT `accepting_blue_score` or `blue_score`)
 - Endpoint: `GET https://api.kaspa.org/transactions/{txId}`
 
+## push-tx field-name robustness (critical)
+
+The signed JSON returned by KasWare's `signPskt` may use different field names than the Kaspa REST API expects. `push-tx` must:
+1. **Unwrap** the transaction if it's wrapped: `const txData = tx.inputs ? tx : (tx.transaction ?? tx)`
+2. **Resolve outpoint** with all variants: `inp.previousOutpoint ?? inp.previous_outpoint ?? inp.outpoint ?? {}`
+3. **Resolve txId** with all variants: `op.transactionId ?? op.transaction_id ?? op.txId ?? op.txid ?? ''`
+4. **Pre-flight** before submitting: throw a descriptive error if any input's `transactionId` is falsy — this prevents the cryptic Kaspa REST API "missing field `transactionId`" error from reaching the user.
+
+**Why:** The Kaspa REST API (Go serde) says "missing field `transactionId` at line 1 col N" when `transactionId` is absent — which happens when JSON.stringify drops an `undefined` value. Column N ≈ 5265 because the P2SH signatureScript is ~5002 hex chars, placing the second input's outpoint at that position.
+
+**Confirmed:** Submitting unsigned JSON (valid txIds, empty signatureScript) → Kaspa API says "failed to verify empty signature script" (not missing field). So the mapping is correct when txIds are present.
+
+## Production vs dev server conflict
+
+In Replit, the production deployment and dev workflow both bind to port 8080. The production process starts first and owns the port; if the dev workflow tries to restart, it gets EADDRINUSE. Kill the blocking PID (`lsof -i :8080 -t | xargs kill`) before restarting the dev workflow. The production deployment must be re-published to pick up code changes — dev rebuilds only update the dev server.
+
 ## Browser flow (home.tsx)
 
 1. `handleExecuteDisperse` routes KCC-20 to `executeKcc20Disperse`
