@@ -5,7 +5,8 @@ description: How KCC-20 (KRON) token transfers work — P2SH covenant transactio
 
 ## Core facts
 
-- **1 KRON = 1 sompi** stored in the covenant UTXO. User inputs whole numbers (dec=0).
+- **Covenant UTXO KAS value is FIXED at 0.5 KAS (50,000,000 sompi)** regardless of token amount — the KRON amount lives ONLY in the redeemScript state bytes. (Earlier "1 KRON = 1 sompi" was WRONG; verified against on-chain data across multiple holders.) Every covenant output must carry exactly 0.5 KAS, so sender's KAS must fund `fee + 0.5×outputs − 0.5×covenantInputs`.
+- **Authoritative utxoEntry data** (sompi amount, blockDaaScore, spk): derive the covenant's P2SH address (version byte 8 + blake2b256(redeemScript), Kaspa cashaddr polymod encoding) and query `api.kaspa.org/addresses/{p2shAddr}/utxos`. Do NOT use tx `accepting_block_blue_score` as blockDaaScore — it's a different value.
 - **Batch size**: max 3 recipients per tx (covenant maxOuts=4 including change).
 - **Fee**: fixed 5,000,000 sompi (0.05 KAS) per transaction — covenant mass is large (~2433-byte redeemScript).
 - **UTXO source**: Kron indexer proxied at `/api/kron/*` (CORS-blocked otherwise).
@@ -62,8 +63,11 @@ Different from `signKaspaTransaction` format. Uses kaspa-wasm `Transaction.seria
     "redeemScript": "207a97..."  // P2SH inputs only — wallet uses this for sighash
   }],
   "outputs": [{
-    "value": "100",        // "value" not "amount", string
-    "scriptPublicKey": {"version": 0, "script": "hex"}
+    "value": "50000000",   // FIXED 0.5 KAS for covenant outputs; "value" not "amount", string
+    "scriptPublicKey": {"version": 0, "script": "aa20...87"}
+  }, {
+    "value": "621977418973", // KAS change back to sender (P2PK)
+    "scriptPublicKey": {"version": 0, "script": "20<senderPubkey>ac"}
   }],
   "lockTime": "0",
   "subnetworkId": "0000000000000000000000000000000000000000",

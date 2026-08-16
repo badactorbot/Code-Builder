@@ -157,7 +157,7 @@ router.post('/build-tx', async (req, res) => {
     for (const utxo of utxos) {
       selected.push(utxo);
       selectedTotal += utxo.amount;
-      const fee = estimateFee(selected.length, numOutputs);
+    const fee = estimateFee(selected.length, numOutputs);
       if (selectedTotal >= totalPaymentSompi + fee) break;
     }
 
@@ -309,7 +309,7 @@ router.post('/push-tx', async (req, res) => {
     };
 
     // Validate: every input must have a non-empty transactionId before we submit
-    const badInput = submitTx.inputs.findIndex((i) => !i.previousOutpoint.transactionId);
+    const badInput = submitTx.inputs.findIndex((i: { previousOutpoint: { transactionId: string } }) => !i.previousOutpoint.transactionId);
     if (badInput !== -1) {
       // Log the raw signed input so we can see what field names the wallet used
       const rawInp = (tx.inputs ?? [])[badInput];

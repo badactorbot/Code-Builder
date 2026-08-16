@@ -93,10 +93,54 @@ function materializeScript(template: Uint8Array, recipientPubkey: Uint8Array, am
   return s;
 }
 
+// ── Bech32 ENCODING (for deriving P2SH addresses) ────────────────────────────
+// Kaspa cashaddr-style checksum polymod (verified round-trip against real addresses).
+function bech32Polymod(values: number[]): bigint {
+  let c = 1n;
+  for (const d of values) {
+    const c0 = c >> 35n;
+    c = ((c & 0x07ffffffffn) << 5n) ^ BigInt(d);
+    if (c0 & 0x01n) c ^= 0x98f2bc8e61n;
+    if (c0 & 0x02n) c ^= 0x79b76d99e2n;
+    if (c0 & 0x04n) c ^= 0xf33e5fb3c4n;
+    if (c0 & 0x08n) c ^= 0xae2eabe2a8n;
+    if (c0 & 0x10n) c ^= 0x1e4f43e470n;
+  }
+  return c ^ 1n;
+}
+
+function to5bit(bytes: number[] | Uint8Array): number[] {
+  const out: number[] = [];
+  let acc = 0, bits = 0;
+  for (const b of bytes) {
+    acc = (acc << 8) | b;
+    bits += 8;
+    while (bits >= 5) { bits -= 5; out.push((acc >> bits) & 31); }
+  }
+  if (bits > 0) out.push((acc << (5 - bits)) & 31);
+  return out;
+}
+
+/** Encode a Kaspa address from version byte + hash. Version 8 = ScriptHash (P2SH). */
+function encodeKaspaAddress(version: number, hash: Uint8Array, prefix = 'kaspa'): string {
+  const data5 = to5bit([version, ...hash]);
+  const prefix5 = [...prefix].map((c) => c.charCodeAt(0) & 0x1f);
+  const cs = bech32Polymod([...prefix5, 0, ...data5, 0, 0, 0, 0, 0, 0, 0, 0]);
+  let s = '';
+  for (const d of data5) s += BECH32_CHARS[d];
+  for (let i = 0; i < 8; i++) s += BECH32_CHARS[Number((cs >> BigInt(5 * (7 - i))) & 31n)];
+  return `${prefix}:${s}`;
+}
+
 // ── Fee constants ─────────────────────────────────────────────────────────────
 // Covenant transactions with large redeemScripts have significant mass.
 // Use a conservative fixed fee of 0.05 KAS to ensure relay acceptance.
 const KCC20_FEE_SOMPI = 5_000_000n; // 0.05 KAS
+
+// Every KRON covenant UTXO carries a fixed 0.5 KAS regardless of token amount
+// (the token amount lives in the redeemScript state, not in the output value).
+// Verified against on-chain data: all holder UTXOs = 50,000,000 sompi.
+const COVENANT_OUTPUT_SOMPI = 50_000_000n; // 0.5 KAS
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 
@@ -198,6 +242,42 @@ router.post('/build-kcc20-transfer', async (req, res) => {
     }
     const template = Buffer.from(templateHex, 'hex');
 
+    // ── 4b. Fetch authoritative on-chain UTXO entries for covenant inputs ─
+    // The Kron indexer's `amount` is the TOKEN amount; the actual on-chain
+    // output value is fixed at 0.5 KAS. We need the real sompi amount and
+    // blockDaaScore for a correct sighash, so query the Kaspa API via the
+    // covenant's derived P2SH address.
+    const covenantEntries = await Promise.all(
+      selectedKron.map(async (u) => {
+        const redeemHex: string = u.redeemScriptHex ?? u.script ?? '';
+        if (!redeemHex) throw new Error('Kron indexer did not return redeemScriptHex for a selected UTXO');
+        const redeem = Buffer.from(redeemHex, 'hex');
+        const p2shAddr = encodeKaspaAddress(8, blake2b256(redeem));
+        const r = await fetch(`${KASPA_API}/addresses/${encodeURIComponent(p2shAddr)}/utxos`);
+        if (!r.ok) throw new Error(`Kaspa API returned ${r.status} for covenant UTXO lookup`);
+        const list = await r.json() as any[];
+        const txId: string = u.outpoint?.transactionId ?? u.transactionId ?? '';
+        const idx: number = u.outpoint?.index ?? 0;
+        const match = (Array.isArray(list) ? list : []).find(
+          (x: any) => x.outpoint?.transactionId === txId && Number(x.outpoint?.index) === idx,
+        );
+        if (!match) {
+          throw new Error(`Covenant UTXO ${txId.slice(0, 12)}…:${idx} not found on-chain (may be spent or not yet indexed)`);
+        }
+        const spkRaw = match.utxoEntry?.scriptPublicKey;
+        return {
+          txId,
+          index: idx,
+          redeemScriptHex: redeemHex,
+          amountSompi: BigInt(match.utxoEntry?.amount ?? 0),
+          scriptPublicKeyHex: typeof spkRaw === 'string' ? spkRaw : (spkRaw?.scriptPublicKey ?? spkRaw?.script ?? ''),
+          blockDaaScore: String(match.utxoEntry?.blockDaaScore ?? '0'),
+          isCoinbase: Boolean(match.utxoEntry?.isCoinbase ?? false),
+        };
+      }),
+    );
+    const covenantInSompi = covenantEntries.reduce((s, e) => s + e.amountSompi, 0n);
+
     // ── 5. Fetch sender's KAS UTXOs (for fee payment) ─────────────────────
     const kasResp = await fetch(
       `${KASPA_API}/addresses/${encodeURIComponent(senderAddress)}/utxos`,
@@ -214,42 +294,37 @@ router.post('/build-kcc20-transfer', async (req, res) => {
       return diff > 0n ? 1 : diff < 0n ? -1 : 0;
     });
 
+    // ── 6. Determine required KAS ─────────────────────────────────────────
+    // Every covenant output must carry 0.5 KAS. Covenant inputs contribute
+    // their own 0.5 KAS each, so the sender's KAS UTXOs must cover:
+    //   fee + (covenant outputs × 0.5 KAS) − (covenant inputs' sompi)
+    const changeAmount = selectedTotal - totalNeeded;
+    const numCovenantOutputs = recipients.length + (changeAmount > 0n ? 1 : 0);
+    const covenantOutSompi = BigInt(numCovenantOutputs) * COVENANT_OUTPUT_SOMPI;
+    const requiredKas = KCC20_FEE_SOMPI + covenantOutSompi - covenantInSompi;
+
     let feeUtxos: any[] = [];
     let feeTotal = 0n;
 
-    const singleFeeUtxo = sortedKas.find((u: any) => BigInt(u.utxoEntry?.amount ?? 0) >= KCC20_FEE_SOMPI);
-    if (singleFeeUtxo) {
-      feeUtxos = [singleFeeUtxo];
-      feeTotal = BigInt(singleFeeUtxo.utxoEntry?.amount ?? 0);
-    } else {
-      // Combine multiple UTXOs until we cover the fee
-      for (const u of sortedKas) {
-        feeUtxos.push(u);
-        feeTotal += BigInt(u.utxoEntry?.amount ?? 0);
-        if (feeTotal >= KCC20_FEE_SOMPI) break;
-      }
-      if (feeTotal < KCC20_FEE_SOMPI) {
-        return res.status(400).json({
-          error: `Insufficient KAS for fee — need ≥${Number(KCC20_FEE_SOMPI) / 1e8} KAS, have ${Number(feeTotal) / 1e8} KAS`,
-        });
+    if (requiredKas > 0n) {
+      const singleFeeUtxo = sortedKas.find((u: any) => BigInt(u.utxoEntry?.amount ?? 0) >= requiredKas);
+      if (singleFeeUtxo) {
+        feeUtxos = [singleFeeUtxo];
+        feeTotal = BigInt(singleFeeUtxo.utxoEntry?.amount ?? 0);
+      } else {
+        // Combine multiple UTXOs until we cover the requirement
+        for (const u of sortedKas) {
+          feeUtxos.push(u);
+          feeTotal += BigInt(u.utxoEntry?.amount ?? 0);
+          if (feeTotal >= requiredKas) break;
+        }
+        if (feeTotal < requiredKas) {
+          return res.status(400).json({
+            error: `Insufficient KAS — need ≥${Number(requiredKas) / 1e8} KAS (fee + 0.5 KAS per covenant output), have ${Number(feeTotal) / 1e8} KAS`,
+          });
+        }
       }
     }
-
-    // ── 6. Get blockDaaScore for KRON UTXOs from Kaspa tx API ─────────────
-    const txDaaScores = new Map<string, string>();
-    await Promise.allSettled(
-      selectedKron.map(async (u) => {
-        const txId: string = u.outpoint?.transactionId ?? u.transactionId ?? '';
-        if (!txId || txDaaScores.has(txId)) return;
-        try {
-          const r = await fetch(`${KASPA_API}/transactions/${txId}`);
-          const d = await r.json() as any;
-          txDaaScores.set(txId, String(d.accepting_block_blue_score ?? d.accepting_blue_score ?? d.blue_score ?? 0));
-        } catch {
-          txDaaScores.set(txId, '0');
-        }
-      }),
-    );
 
     // ── 7. Build recipient redeemScripts and P2SH scriptPublicKeys ────────
     const senderPubkey = addrToPubkey(senderAddress);
@@ -265,7 +340,6 @@ router.post('/build-kcc20-transfer', async (req, res) => {
     });
 
     // ── 8. KRON change back to sender ─────────────────────────────────────
-    const changeAmount = selectedTotal - totalNeeded;
     let kronChangeOutput: { redeemScriptHex: string; scriptPublicKeyHex: string; amount: bigint } | null = null;
     if (changeAmount > 0n) {
       const changeRedeem = materializeScript(template, senderPubkey, changeAmount);
@@ -278,31 +352,29 @@ router.post('/build-kcc20-transfer', async (req, res) => {
 
     // ── 9. KAS change back to sender ──────────────────────────────────────
     const senderP2pkScript = '20' + Buffer.from(senderPubkey).toString('hex') + 'ac';
-    const kasChange = feeTotal - KCC20_FEE_SOMPI;
+    // KAS change = everything in minus everything out minus fee
+    const kasChange = feeTotal + covenantInSompi - covenantOutSompi - KCC20_FEE_SOMPI;
 
     // ── 10. Assemble Transaction JSON (kaspa-wasm serializeToSafeJSON format) ─
     // This format is what kasware.signPskt expects.
     const inputs: any[] = [];
 
-    // KRON covenant inputs — include redeemScript so the wallet can sign P2SH
-    for (const u of selectedKron) {
-      const txId: string = u.outpoint?.transactionId ?? '';
-      const idx: number = u.outpoint?.index ?? 0;
-      const amount: string = String(u.amount ?? u.utxoEntry?.amount ?? 0);
-      const spk: string = u.scriptPublicKey ?? '';
-
+    // KRON covenant inputs — include redeemScript so the wallet can sign P2SH.
+    // utxoEntry uses the AUTHORITATIVE on-chain values (real sompi amount +
+    // blockDaaScore) fetched in step 4b — not the indexer's token amounts.
+    for (const e of covenantEntries) {
       inputs.push({
-        previousOutpoint: { transactionId: txId, index: idx },
+        previousOutpoint: { transactionId: e.txId, index: e.index },
         signatureScript: '',
         sequence: '0',
         sigOpCount: 1,
         utxoEntry: {
-          amount,
-          scriptPublicKey: { version: 0, script: spk },
-          blockDaaScore: txDaaScores.get(txId) ?? '0',
-          isCoinbase: false,
+          amount: String(e.amountSompi),
+          scriptPublicKey: { version: 0, script: e.scriptPublicKeyHex },
+          blockDaaScore: e.blockDaaScore,
+          isCoinbase: e.isCoinbase,
         },
-        redeemScript: u.redeemScriptHex ?? u.script ?? '',
+        redeemScript: e.redeemScriptHex,
       });
     }
 
@@ -328,10 +400,12 @@ router.post('/build-kcc20-transfer', async (req, res) => {
       });
     }
 
+    // Every covenant output carries a fixed 0.5 KAS — the KRON token amount
+    // is encoded in the redeemScript state, NOT in the output value.
     const outputs: any[] = [
       // Recipient KRON covenant outputs
       ...recipientOutputs.map((o) => ({
-        value: String(o.amount),
+        value: String(COVENANT_OUTPUT_SOMPI),
         scriptPublicKey: { version: 0, script: o.scriptPublicKeyHex },
       })),
     ];
@@ -339,7 +413,7 @@ router.post('/build-kcc20-transfer', async (req, res) => {
     // KRON change output (if any)
     if (kronChangeOutput) {
       outputs.push({
-        value: String(kronChangeOutput.amount),
+        value: String(COVENANT_OUTPUT_SOMPI),
         scriptPublicKey: { version: 0, script: kronChangeOutput.scriptPublicKeyHex },
       });
     }
