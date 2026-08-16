@@ -669,109 +669,14 @@ export default function Home() {
     }
   };
 
-  // ── KAS execution: multi-output path with server-built tx ─────────────
+  // ── KAS execution: one sendKaspa() call per recipient ─────────────────
   const executeKasDisperse = async () => {
     if (!account) return;
     const provider = account.provider;
 
-    const canMultiSign = provider && typeof provider.signKaspaTransaction === 'function';
-    console.log('[KaspaDisperse] provider methods:', {
-      signKaspaTransaction: typeof provider?.signKaspaTransaction,
-      pushTx: typeof provider?.pushTx,
-      sendKaspa: typeof provider?.sendKaspa,
-      canMultiSign,
-    });
-
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
 
-      // ── MULTI-OUTPUT PATH ────────────────────────────────────────────
-      if (canMultiSign) {
-        setBatchStatuses((prev) => {
-          const copy = [...prev];
-          copy[i] = { status: 'building', txId: '' };
-          return copy;
-        });
-
-        let pendingTxs: { id: string; txJson: string; paymentAmount: string; feeAmount: string }[];
-        try {
-          const recipients = PLATFORM_FEE_KAS > 0
-            ? [...batch.map((r) => ({ address: r.address, amount: r.amount })), { address: TREASURY_ADDRESS, amount: PLATFORM_FEE_KAS }]
-            : batch.map((r) => ({ address: r.address, amount: r.amount }));
-
-          const res = await fetch('/api/kaspa/build-tx', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ senderAddress: account.address, recipients }),
-          });
-          const body = await res.json();
-          if (!res.ok) throw new Error(body.error ?? `Server error ${res.status}`);
-          pendingTxs = body.pendingTxs;
-        } catch (err: any) {
-          setBatchStatuses((prev) => {
-            const copy = [...prev];
-            copy[i] = { status: 'failed', txId: '', error: err.message ?? 'Failed to build transaction' };
-            return copy;
-          });
-          setIsProcessing(false);
-          return;
-        }
-
-        let lastTxId = '';
-        let txFailed = false;
-
-        for (let t = 0; t < pendingTxs.length; t++) {
-          const { txJson } = pendingTxs[t];
-
-          setBatchStatuses((prev) => {
-            const copy = [...prev];
-            copy[i] = {
-              status: 'signing',
-              txId: '',
-              signingProgress: pendingTxs.length > 1 ? `tx ${t + 1} of ${pendingTxs.length}` : undefined,
-            };
-            return copy;
-          });
-
-          try {
-            const signedJson = await provider.signKaspaTransaction(txJson, ['All']);
-
-            let pushRaw: any;
-            if (typeof provider.pushTx === 'function') {
-              pushRaw = await provider.pushTx({ rawtx: signedJson });
-            } else {
-              const pushRes = await fetch('/api/kaspa/push-tx', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ signedTxJson: signedJson }),
-              });
-              const pushBody = await pushRes.json();
-              if (!pushRes.ok) throw new Error(pushBody.error ?? `Broadcast failed ${pushRes.status}`);
-              pushRaw = pushBody.txId ?? pushBody.transactionId ?? '';
-            }
-            lastTxId = typeof pushRaw === 'string' ? pushRaw : (pushRaw?.txId ?? pendingTxs[t].id);
-          } catch (err: any) {
-            setBatchStatuses((prev) => {
-              const copy = [...prev];
-              copy[i] = { status: 'failed', txId: '', error: err?.message ?? 'Signing or submission failed' };
-              return copy;
-            });
-            txFailed = true;
-            break;
-          }
-        }
-
-        if (txFailed) { setIsProcessing(false); return; }
-
-        setBatchStatuses((prev) => {
-          const copy = [...prev];
-          copy[i] = { status: 'sent', txId: lastTxId };
-          return copy;
-        });
-        continue;
-      }
-
-      // ── SINGLE-OUTPUT FALLBACK ───────────────────────────────────────
       if (!provider || typeof provider.sendKaspa !== 'function') {
         setBatchStatuses((prev) => {
           const copy = [...prev];
@@ -1101,7 +1006,7 @@ export default function Home() {
                   <div className="text-xs text-zinc-400">Signing Model</div>
                   <div className="text-xs font-semibold text-zinc-200 mt-0.5">
                     {mode === 'kas'
-                      ? `${batches.length} Batch${batches.length === 1 ? '' : 'es'} — 1 approval each`
+                      ? `${parsedRecipients.length} transfer${parsedRecipients.length === 1 ? '' : 's'} — 1 sign each`
                       : tokenInfo?.state === 'kcc-20'
                         ? `${Math.ceil(parsedRecipients.length / 3)} Batch${Math.ceil(parsedRecipients.length / 3) === 1 ? '' : 'es'} — 1 approval each (≤3 recipients/batch)`
                         : `${batches.length} Batch${batches.length === 1 ? '' : 'es'} — commit-reveal per recipient`}
