@@ -251,8 +251,8 @@ router.post('/push-tx', async (req, res) => {
     const apiBase = API_BASE[networkId] ?? API_BASE.mainnet;
 
     // Parse the SignableTransaction JSON from the wallet
-    // DEBUG: log the raw structure so we can diagnose KasWare format issues
     const rawStr = typeof signedTxJson === 'string' ? signedTxJson : JSON.stringify(signedTxJson);
+    console.log('[push-tx] received JSON length:', rawStr.length, '| first 300:', rawStr.slice(0, 300));
     const tx = JSON.parse(rawStr);
 
     // Handle wrapped format: some wallet versions return { transaction: { inputs, outputs, ... } }
@@ -321,10 +321,21 @@ router.post('/push-tx', async (req, res) => {
       );
     }
 
+    // Log the exact payload we send to Kaspa so we can diagnose format issues
+    const submitPayload = { transaction: submitTx, allowOrphan: false };
+    console.log('[push-tx] submitting to Kaspa. inputs:', JSON.stringify(
+      submitTx.inputs.map((i: any) => ({
+        previousOutpoint: i.previousOutpoint,
+        signatureScriptLen: i.signatureScript?.length ?? 0,
+        sigOpCount: i.sigOpCount,
+        sequence: i.sequence,
+      }))
+    ));
+
     const submitRes = await fetch(`${apiBase}/transactions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transaction: submitTx, allowOrphan: false }),
+      body: JSON.stringify(submitPayload),
     });
 
     const submitBody = await submitRes.json() as any;

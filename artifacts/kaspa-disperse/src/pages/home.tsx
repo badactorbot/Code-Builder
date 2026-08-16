@@ -580,73 +580,88 @@ export default function Home() {
           throw new Error(sigErr?.message ?? 'Wallet rejected the signing request');
         }
 
-        // DEBUG: log exactly what signPskt returned so we can diagnose format issues
-        console.log('[KCC20] signPskt raw result type:', typeof signedResult);
-        if (typeof signedResult === 'string') {
-          try {
-            const parsed = JSON.parse(signedResult);
-            console.log('[KCC20] signed JSON top-level keys:', Object.keys(parsed));
-            if (Array.isArray(parsed.inputs)) {
-              parsed.inputs.forEach((inp: any, i: number) => {
-                const op = inp.previousOutpoint ?? inp.previous_outpoint ?? inp.outpoint ?? {};
-                console.log(`[KCC20] input[${i}] outpoint keys:`, Object.keys(op), '| txId:', Object.values(op)[0]);
-              });
-            }
-          } catch { /* not parseable */ }
-        } else if (signedResult && typeof signedResult === 'object') {
-          console.log('[KCC20] signed result keys:', Object.keys(signedResult));
-          const str = signedResult?.txJsonString;
-          if (str) {
-            try {
-              const parsed = JSON.parse(str);
-              console.log('[KCC20] inner JSON top-level keys:', Object.keys(parsed));
-              if (Array.isArray(parsed.inputs)) {
-                parsed.inputs.forEach((inp: any, i: number) => {
-                  const op = inp.previousOutpoint ?? inp.previous_outpoint ?? inp.outpoint ?? {};
-                  console.log(`[KCC20] input[${i}] outpoint keys:`, Object.keys(op), '| txId:', Object.values(op)[0]);
-                });
-              }
-            } catch { /* not parseable */ }
-          }
-        }
-
         // signPskt may return a string or an object with txJsonString
         const signedJson: string =
           typeof signedResult === 'string'
             ? signedResult
             : (signedResult?.txJsonString ?? JSON.stringify(signedResult));
 
-        // Capture structure info for diagnostics shown in the UI if push-tx fails
-        let signedDiag = '';
-        try {
-          const parsed = JSON.parse(signedJson);
-          const root = parsed.transaction ?? parsed.tx ?? parsed;
-          const inp0 = (root.inputs ?? [])[0] ?? {};
-          const op0 = inp0.previousOutpoint ?? inp0.previous_outpoint ?? inp0.outpoint ?? inp0;
-          const inp1 = (root.inputs ?? [])[1] ?? {};
-          const op1 = inp1.previousOutpoint ?? inp1.previous_outpoint ?? inp1.outpoint ?? inp1;
-          signedDiag = `root_keys=[${Object.keys(parsed).join(',')}] ` +
-            `inp0_keys=[${Object.keys(inp0).join(',')}] op0_keys=[${Object.keys(op0).join(',')}] ` +
-            `inp1_keys=[${Object.keys(inp1).join(',')}] op1_keys=[${Object.keys(op1).join(',')}]`;
-        } catch { signedDiag = 'parse-failed'; }
+        console.log('[KCC20] signedJson first 300:', signedJson.slice(0, 300));
 
-        // ── 3. Broadcast ────────────────────────────────────────────────────
+        // ── 3. Broadcast directly to Kaspa REST API (CORS is open) ──────────
+        // Build the submit payload in the browser — avoids any server-side
+        // format conversion. Strip utxoEntry / redeemScript (wallet-only fields),
+        // normalise value→amount and script→scriptPublicKey for the REST API.
+        let submitTx: any;
+        try {
+          const raw = JSON.parse(signedJson);
+          // Handle optional { transaction: { ... } } wrapper from some wallet versions
+          const txData = Array.isArray(raw.inputs) ? raw : (raw.transaction ?? raw);
+
+          const normaliseOutpoint = (inp: any) => {
+            const op = inp.previousOutpoint ?? inp.previous_outpoint ?? inp.outpoint ?? {};
+            return {
+              transactionId: op.transactionId ?? op.transaction_id ?? op.txId ?? op.txid ?? '',
+              index: Number(op.index ?? op.outputIndex ?? 0),
+            };
+          };
+
+          submitTx = {
+            version: Number(txData.version ?? raw.version ?? 0),
+            inputs: (txData.inputs ?? raw.inputs ?? []).map((inp: any) => ({
+              previousOutpoint: normaliseOutpoint(inp),
+              signatureScript: inp.signatureScript ?? '',
+              sequence: Number(inp.sequence ?? 0),
+              sigOpCount: Number(inp.sigOpCount ?? 1),
+            })),
+            outputs: (txData.outputs ?? raw.outputs ?? []).map((out: any) => ({
+              amount: Number(out.amount ?? out.value ?? 0),
+              scriptPublicKey: {
+                version: Number(out.scriptPublicKey?.version ?? 0),
+                scriptPublicKey: out.scriptPublicKey?.scriptPublicKey ?? out.scriptPublicKey?.script ?? '',
+              },
+            })),
+            lockTime: Number(txData.lockTime ?? raw.lockTime ?? 0),
+            subnetworkId: txData.subnetworkId ?? raw.subnetworkId ?? '0000000000000000000000000000000000000000',
+            gas: Number(txData.gas ?? raw.gas ?? 0),
+            payload: txData.payload ?? raw.payload ?? '',
+          };
+
+          console.log('[KCC20] submitTx inputs:', JSON.stringify(submitTx.inputs.map((inp: any) => ({
+            previousOutpoint: inp.previousOutpoint,
+            sigScriptLen: inp.signatureScript?.length ?? 0,
+          }))));
+        } catch (parseErr: any) {
+          throw new Error(`Failed to parse signed transaction: ${parseErr?.message}`);
+        }
+
+        // Validate: all inputs must have a non-empty transactionId
+        const badIdx = submitTx.inputs.findIndex((inp: any) => !inp.previousOutpoint?.transactionId);
+        if (badIdx !== -1) {
+          throw new Error(`Input ${badIdx} is missing transactionId — wallet returned unexpected format`);
+        }
+
         setBatchStatuses((prev) => {
           const copy = [...prev];
           copy[i] = { status: 'signing', txId: '', signingProgress: 'Broadcasting…' };
           return copy;
         });
 
-        const pushRes = await fetch('/api/kaspa/push-tx', {
+        const pushRes = await fetch('https://api.kaspa.org/transactions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ signedTxJson: signedJson }),
+          body: JSON.stringify({ transaction: submitTx, allowOrphan: false }),
         });
 
         const pushBody = await pushRes.json();
-        if (!pushRes.ok) throw new Error((pushBody.error ?? `Broadcast error ${pushRes.status}`) + ` | diag: ${signedDiag}`);
+        if (!pushRes.ok) {
+          const detail = typeof pushBody?.detail === 'string'
+            ? pushBody.detail
+            : (Array.isArray(pushBody?.detail) ? JSON.stringify(pushBody.detail) : null);
+          throw new Error(detail ?? pushBody?.error ?? `Broadcast failed (${pushRes.status})`);
+        }
 
-        const txId: string = pushBody.txId ?? pushBody.transactionId ?? '';
+        const txId: string = pushBody.transactionId ?? pushBody.txId ?? '';
 
         setBatchStatuses((prev) => {
           const copy = [...prev];
