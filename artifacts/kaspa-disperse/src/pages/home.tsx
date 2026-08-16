@@ -62,6 +62,7 @@ const BATCH_SIZE = 50;
 const PLATFORM_FEE_KAS = 0;
 const TREASURY_ADDRESS = 'kaspa:qpzpfwcsqsxhxwup26r55fd0ghqlhyugz8cp6y3wxuddc02vcxtjg75pspnwz';
 const KASPLEX_API = 'https://api.kasplex.org/v1';
+const KRON_IDX_API = 'https://idx.kron.technology';
 
 // ==========================================
 // TYPES
@@ -142,10 +143,10 @@ export default function Home() {
   }, [isWalletModalOpen]);
 
   // ── Fetch all tokens held by the connected wallet ────────────────────
-  // Strategy 1: ask the wallet via getKRC20Balance() — returns ALL token
-  //   types the wallet tracks, including non-KRC-20 (e.g. Kron tokens).
-  // Strategy 2 (fallback): Kasplex address endpoint — KRC-20 only but
-  //   works for wallets that don't expose getKRC20Balance.
+  // Runs three sources in parallel and merges:
+  //   1. Wallet's getKRC20Balance() — everything the wallet tracks natively
+  //   2. Kasplex — KRC-20 tokens indexed on-chain
+  //   3. Kron KCC-20 indexer — tokens launched on kron.technology
   const fetchWalletTokens = useCallback(async (address: string, provider: any) => {
     if (!address) return;
     setWalletTokensLoading(true);
@@ -155,44 +156,68 @@ export default function Home() {
     setTokenWalletBalance(null);
 
     try {
-      // ── Strategy 1: wallet-native balance API ──────────────────────────
-      if (provider && typeof provider.getKRC20Balance === 'function') {
-        try {
-          const balances: any[] = await provider.getKRC20Balance();
-          const parsed = (balances ?? [])
+      type WalletToken = { tick: string; rawBalance: bigint; dec: string; state: string };
+      const seen = new Set<string>();
+      const merged: WalletToken[] = [];
+
+      const add = (tokens: WalletToken[]) => {
+        for (const t of tokens) {
+          if (!seen.has(t.tick)) { seen.add(t.tick); merged.push(t); }
+        }
+      };
+
+      // Run all three in parallel
+      const [walletBalances, kasplex, kronKcc20] = await Promise.allSettled([
+        // 1. Wallet native API
+        (async () => {
+          if (!provider || typeof provider.getKRC20Balance !== 'function') return [];
+          const raw: any[] = await provider.getKRC20Balance();
+          return (raw ?? [])
             .filter((b: any) => b.tick && BigInt(b.balance ?? '0') > 0n)
-            .map((b: any) => ({
+            .map((b: any): WalletToken => ({
               tick: String(b.tick).toUpperCase(),
               rawBalance: BigInt(b.balance ?? '0'),
               dec: String(b.dec ?? '8'),
               state: String(b.state ?? ''),
             }));
-          if (parsed.length > 0) {
-            setWalletTokens(parsed);
-            setWalletTokensLoading(false);
-            return;
-          }
-        } catch {
-          // wallet method failed — fall through to Kasplex
-        }
-      }
+        })(),
+        // 2. Kasplex (KRC-20)
+        (async () => {
+          const res = await fetch(`${KASPLEX_API}/krc20/address/${encodeURIComponent(address)}/tokenlist`);
+          const data = await res.json();
+          return ((data?.result ?? []) as any[])
+            .filter((b: any) => b.tick && BigInt(b.balance ?? '0') > 0n)
+            .map((b: any): WalletToken => ({
+              tick: String(b.tick).toUpperCase(),
+              rawBalance: BigInt(b.balance ?? '0'),
+              dec: String(b.dec ?? '8'),
+              state: b.opScoreMod ? 'active' : '',
+            }));
+        })(),
+        // 3. Kron KCC-20 indexer
+        (async () => {
+          const res = await fetch(`${KRON_IDX_API}/v1/kcc20/address/${encodeURIComponent(address)}/tokenlist`);
+          const data = await res.json();
+          return ((data?.result ?? []) as any[])
+            .filter((b: any) => b.tick && BigInt(b.balance ?? '0') > 0n)
+            .map((b: any): WalletToken => ({
+              tick: String(b.tick).toUpperCase(),
+              rawBalance: BigInt(b.balance ?? '0'),
+              dec: String(b.dec ?? '0'),   // KCC-20 tokens are whole numbers
+              state: 'kcc-20',
+            }));
+        })(),
+      ]);
 
-      // ── Strategy 2: Kasplex address lookup (KRC-20 only fallback) ──────
-      const res = await fetch(`${KASPLEX_API}/krc20/address/${encodeURIComponent(address)}/tokenlist`);
-      const data = await res.json();
-      const results: any[] = data?.result ?? [];
-      const parsed = results
-        .filter((b: any) => b.tick && BigInt(b.balance ?? '0') > 0n)
-        .map((b: any) => ({
-          tick: String(b.tick).toUpperCase(),
-          rawBalance: BigInt(b.balance ?? '0'),
-          dec: String(b.dec ?? '8'),
-          state: String(b.opScoreMod ? 'active' : ''),
-        }));
-      setWalletTokens(parsed);
-      if (parsed.length === 0) setWalletTokensError('No tokens found for this wallet.');
+      // Merge in priority order: wallet → Kasplex → Kron KCC-20
+      if (walletBalances.status === 'fulfilled') add(walletBalances.value);
+      if (kasplex.status === 'fulfilled') add(kasplex.value);
+      if (kronKcc20.status === 'fulfilled') add(kronKcc20.value);
+
+      setWalletTokens(merged);
+      if (merged.length === 0) setWalletTokensError('No tokens found for this wallet.');
     } catch {
-      setWalletTokensError('Failed to load tokens from wallet.');
+      setWalletTokensError('Failed to load tokens.');
     } finally {
       setWalletTokensLoading(false);
     }
