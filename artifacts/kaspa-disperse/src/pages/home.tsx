@@ -194,9 +194,9 @@ export default function Home() {
               state: b.opScoreMod ? 'active' : '',
             }));
         })(),
-        // 3. Kron KCC-20 indexer
+        // 3. Kron KCC-20 indexer — proxied through our API server to avoid CORS
         (async () => {
-          const res = await fetch(`${KRON_IDX_API}/v1/kcc20/address/${encodeURIComponent(address)}/tokenlist`);
+          const res = await fetch(`/api/kron/kcc20/address/${encodeURIComponent(address)}/tokenlist`);
           const data = await res.json();
           return ((data?.result ?? []) as any[])
             .filter((b: any) => b.tick && BigInt(b.balance ?? '0') > 0n)
