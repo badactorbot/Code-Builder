@@ -209,9 +209,25 @@ export default function Home() {
         })(),
       ]);
 
+      // Build a KCC-20 authority map from Kron indexer results.
+      // Kron is the authoritative source for dec + protocol for these tokens —
+      // the wallet API and Kasplex both assume KRC-20 mechanics and return wrong
+      // dec values (e.g. dec:8) for KCC-20 ticks like KRON.
+      const kcc20Map = new Map<string, { dec: string }>();
+      if (kronKcc20.status === 'fulfilled') {
+        for (const t of kronKcc20.value) kcc20Map.set(t.tick, { dec: t.dec });
+      }
+
+      // Correct any token that Kron knows about before adding it to the merged list
+      const correctKcc20 = (tokens: WalletToken[]): WalletToken[] =>
+        tokens.map((t) => {
+          const kcc = kcc20Map.get(t.tick);
+          return kcc ? { ...t, dec: kcc.dec, state: 'kcc-20' } : t;
+        });
+
       // Merge in priority order: wallet → Kasplex → Kron KCC-20
-      if (walletBalances.status === 'fulfilled') add(walletBalances.value);
-      if (kasplex.status === 'fulfilled') add(kasplex.value);
+      if (walletBalances.status === 'fulfilled') add(correctKcc20(walletBalances.value));
+      if (kasplex.status === 'fulfilled') add(correctKcc20(kasplex.value));
       if (kronKcc20.status === 'fulfilled') add(kronKcc20.value);
 
       setWalletTokens(merged);
@@ -232,20 +248,24 @@ export default function Home() {
     setTokenWalletBalance((Number(rawBalance) / Math.pow(10, decNum))
       .toLocaleString(undefined, { maximumFractionDigits: decNum }));
 
-    // Best-effort Kasplex refinement for dec accuracy
-    try {
-      const res = await fetch(`${KASPLEX_API}/krc20/token/${encodeURIComponent(tick)}`);
-      const data = await res.json();
-      const info = data?.result?.[0];
-      if (info?.dec != null) {
-        const refinedDec = String(info.dec);
-        const refinedDecNum = parseInt(refinedDec, 10);
-        setTokenInfo({ tick, dec: refinedDec, state: info.state ?? state });
-        setTokenWalletBalance((Number(rawBalance) / Math.pow(10, refinedDecNum))
-          .toLocaleString(undefined, { maximumFractionDigits: refinedDecNum }));
+    // Best-effort Kasplex refinement for dec accuracy.
+    // Skip for KCC-20 tokens — Kasplex has no authority over them and returns
+    // wrong dec values (it treats the tick as KRC-20 which it isn't).
+    if (state !== 'kcc-20') {
+      try {
+        const res = await fetch(`${KASPLEX_API}/krc20/token/${encodeURIComponent(tick)}`);
+        const data = await res.json();
+        const info = data?.result?.[0];
+        if (info?.dec != null) {
+          const refinedDec = String(info.dec);
+          const refinedDecNum = parseInt(refinedDec, 10);
+          setTokenInfo({ tick, dec: refinedDec, state: info.state ?? state });
+          setTokenWalletBalance((Number(rawBalance) / Math.pow(10, refinedDecNum))
+            .toLocaleString(undefined, { maximumFractionDigits: refinedDecNum }));
+        }
+      } catch {
+        // Keep what we have — non-blocking
       }
-    } catch {
-      // Keep what we have — non-blocking
     }
   }, []);
 
@@ -369,6 +389,15 @@ export default function Home() {
     if (mode === 'krc20') {
       if (!tokenInfo) {
         alert('Please enter and verify a valid KRC-20 token ticker first.');
+        return;
+      }
+      if (tokenInfo.state === 'kcc-20') {
+        alert(
+          `${tokenInfo.tick} is a KCC-20 token (covenant-based), not KRC-20.\n\n` +
+          `KCC-20 uses a different on-chain protocol — the KRC-20 commit-reveal API cannot transfer it. ` +
+          `If you proceed, only small KAS fees will leave your wallet; no ${tokenInfo.tick} will reach your recipients.\n\n` +
+          `KCC-20 dispersal is not yet supported.`
+        );
         return;
       }
       if (typeof account.provider?.krc20BatchTransferTransaction !== 'function') {
@@ -769,6 +798,7 @@ export default function Home() {
                 <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
                   {walletTokens.map(({ tick, rawBalance, dec, state }) => {
                     const isSelected = tokenInfo?.tick === tick;
+                    const isKcc20 = state === 'kcc-20';
                     const decNum = parseInt(dec, 10);
                     const displayBalance = (Number(rawBalance) / Math.pow(10, decNum)).toLocaleString(undefined, { maximumFractionDigits: 4 });
                     return (
@@ -779,12 +809,17 @@ export default function Home() {
                         className={`text-left rounded-xl border p-3 transition ${
                           isSelected
                             ? 'border-violet-500 bg-violet-950/40 ring-1 ring-violet-500/40'
-                            : 'border-zinc-800 bg-zinc-950 hover:border-violet-700/60 hover:bg-violet-950/20'
+                            : isKcc20
+                              ? 'border-amber-800/50 bg-zinc-950 hover:border-amber-600/60 hover:bg-amber-950/10'
+                              : 'border-zinc-800 bg-zinc-950 hover:border-violet-700/60 hover:bg-violet-950/20'
                         } ${tokenSelectLoading ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                       >
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-sm text-zinc-100 tracking-wide">{tick}</span>
-                          {isSelected && <CheckCircle2 className="h-4 w-4 text-violet-400 shrink-0" />}
+                          {isSelected
+                            ? <CheckCircle2 className="h-4 w-4 text-violet-400 shrink-0" />
+                            : isKcc20 && <span className="text-[9px] bg-amber-900/60 border border-amber-700/40 text-amber-400 px-1.5 py-0.5 rounded-full">KCC-20</span>
+                          }
                         </div>
                         <div className="text-[11px] text-zinc-400 truncate">{displayBalance}</div>
                       </button>
@@ -914,8 +949,29 @@ export default function Home() {
               </div>
             </div>
 
-            {/* KRC-20 note */}
-            {mode === 'krc20' && (
+            {/* KRC-20 / KCC-20 note */}
+            {mode === 'krc20' && tokenInfo?.state === 'kcc-20' && (
+              <div className="rounded-xl bg-amber-950/30 border border-amber-700/50 p-3 text-xs text-amber-300 space-y-1">
+                <div className="font-semibold flex items-center gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  KCC-20 token — dispersal not supported
+                </div>
+                <div className="text-amber-400/80 leading-relaxed">
+                  <strong>{tokenInfo.tick}</strong> uses the KCC-20 covenant protocol, which is different from KRC-20.
+                  The KRC-20 commit-reveal API cannot transfer it — only KAS fees would leave your wallet.
+                  KCC-20 dispersal support is not yet available.
+                </div>
+              </div>
+            )}
+            {mode === 'krc20' && tokenInfo?.state !== 'kcc-20' && (
+              <div className="rounded-xl bg-violet-950/20 border border-violet-800/30 p-3 text-xs text-violet-300 space-y-1">
+                <div className="font-semibold">How KRC-20 transfers work</div>
+                <div className="text-zinc-400 leading-relaxed">
+                  Each recipient gets a commit + reveal transaction pair. Approve once per batch — the wallet handles all commit-reveal pairs automatically.
+                </div>
+              </div>
+            )}
+            {mode === 'krc20' && !tokenInfo && (
               <div className="rounded-xl bg-violet-950/20 border border-violet-800/30 p-3 text-xs text-violet-300 space-y-1">
                 <div className="font-semibold">How KRC-20 transfers work</div>
                 <div className="text-zinc-400 leading-relaxed">
