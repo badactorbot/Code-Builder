@@ -141,16 +141,43 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [isWalletModalOpen]);
 
-  // ── Fetch all KRC-20 tokens held by the connected wallet via Kasplex ──
-  // Uses the address-based Kasplex endpoint — works with any wallet.
-  const fetchWalletTokens = useCallback(async (address: string) => {
+  // ── Fetch all tokens held by the connected wallet ────────────────────
+  // Strategy 1: ask the wallet via getKRC20Balance() — returns ALL token
+  //   types the wallet tracks, including non-KRC-20 (e.g. Kron tokens).
+  // Strategy 2 (fallback): Kasplex address endpoint — KRC-20 only but
+  //   works for wallets that don't expose getKRC20Balance.
+  const fetchWalletTokens = useCallback(async (address: string, provider: any) => {
     if (!address) return;
     setWalletTokensLoading(true);
     setWalletTokensError('');
     setWalletTokens([]);
     setTokenInfo(null);
     setTokenWalletBalance(null);
+
     try {
+      // ── Strategy 1: wallet-native balance API ──────────────────────────
+      if (provider && typeof provider.getKRC20Balance === 'function') {
+        try {
+          const balances: any[] = await provider.getKRC20Balance();
+          const parsed = (balances ?? [])
+            .filter((b: any) => b.tick && BigInt(b.balance ?? '0') > 0n)
+            .map((b: any) => ({
+              tick: String(b.tick).toUpperCase(),
+              rawBalance: BigInt(b.balance ?? '0'),
+              dec: String(b.dec ?? '8'),
+              state: String(b.state ?? ''),
+            }));
+          if (parsed.length > 0) {
+            setWalletTokens(parsed);
+            setWalletTokensLoading(false);
+            return;
+          }
+        } catch {
+          // wallet method failed — fall through to Kasplex
+        }
+      }
+
+      // ── Strategy 2: Kasplex address lookup (KRC-20 only fallback) ──────
       const res = await fetch(`${KASPLEX_API}/krc20/address/${encodeURIComponent(address)}/tokenlist`);
       const data = await res.json();
       const results: any[] = data?.result ?? [];
@@ -163,27 +190,44 @@ export default function Home() {
           state: String(b.opScoreMod ? 'active' : ''),
         }));
       setWalletTokens(parsed);
-      if (parsed.length === 0) setWalletTokensError('No KRC-20 tokens found for this address.');
+      if (parsed.length === 0) setWalletTokensError('No tokens found for this wallet.');
     } catch {
-      setWalletTokensError('Failed to load KRC-20 tokens from Kasplex.');
+      setWalletTokensError('Failed to load tokens from wallet.');
     } finally {
       setWalletTokensLoading(false);
     }
   }, []);
 
-  // ── Select a token — all info already loaded from the token list ──────
-  const handleSelectToken = useCallback((tick: string, rawBalance: bigint, dec: string, state: string) => {
-    setTokenSelectLoading(false);
+  // ── Select a token ────────────────────────────────────────────────────
+  // Sets immediately from cached data, then tries Kasplex to confirm
+  // the decimal precision (important for tokens where wallet defaults to 8).
+  const handleSelectToken = useCallback(async (tick: string, rawBalance: bigint, dec: string, state: string) => {
     setTokenInfo({ tick, dec, state });
     const decNum = parseInt(dec, 10);
-    const whole = Number(rawBalance) / Math.pow(10, decNum);
-    setTokenWalletBalance(whole.toLocaleString(undefined, { maximumFractionDigits: decNum }));
+    setTokenWalletBalance((Number(rawBalance) / Math.pow(10, decNum))
+      .toLocaleString(undefined, { maximumFractionDigits: decNum }));
+
+    // Best-effort Kasplex refinement for dec accuracy
+    try {
+      const res = await fetch(`${KASPLEX_API}/krc20/token/${encodeURIComponent(tick)}`);
+      const data = await res.json();
+      const info = data?.result?.[0];
+      if (info?.dec != null) {
+        const refinedDec = String(info.dec);
+        const refinedDecNum = parseInt(refinedDec, 10);
+        setTokenInfo({ tick, dec: refinedDec, state: info.state ?? state });
+        setTokenWalletBalance((Number(rawBalance) / Math.pow(10, refinedDecNum))
+          .toLocaleString(undefined, { maximumFractionDigits: refinedDecNum }));
+      }
+    } catch {
+      // Keep what we have — non-blocking
+    }
   }, []);
 
   // ── Auto-fetch wallet tokens when switching to KRC-20 mode or connecting ─
   useEffect(() => {
     if (mode === 'krc20' && account?.address) {
-      fetchWalletTokens(account.address);
+      fetchWalletTokens(account.address, account.provider);
     }
     if (mode !== 'krc20') {
       setWalletTokens([]);
@@ -661,7 +705,7 @@ export default function Home() {
                 </label>
                 {account?.address && (
                   <button
-                    onClick={() => fetchWalletTokens(account.address)}
+                    onClick={() => fetchWalletTokens(account.address, account.provider)}
                     disabled={walletTokensLoading}
                     className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-violet-300 transition disabled:opacity-50"
                     title="Refresh token list"
