@@ -5,6 +5,7 @@ const router = Router();
 
 const KRON_IDX = 'https://idx.kron.technology';
 const KASPA_API = 'https://api.kaspa.org';
+const KASPLEX_API = 'https://api.kasplex.org/v1';
 
 // ── Bech32 helpers (same charset as kaspa.ts) ────────────────────────────────
 const BECH32_CHARS = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
@@ -131,6 +132,25 @@ function encodeKaspaAddress(version: number, hash: Uint8Array, prefix = 'kaspa')
   for (let i = 0; i < 8; i++) s += BECH32_CHARS[Number((cs >> BigInt(5 * (7 - i))) & 31n)];
   return `${prefix}:${s}`;
 }
+
+// ── Kasplex proxy ─────────────────────────────────────────────────────────────
+// api.kasplex.org blocks direct browser requests (CORS / rate-limit → 403).
+// All Kasplex calls from the frontend must go through this proxy.
+
+router.get('/kasplex/*path', async (req, res) => {
+  const subpath = Array.isArray(req.params.path) ? req.params.path.join('/') : (req.params as any).path as string;
+  const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  const upstream = `${KASPLEX_API}/${subpath}${qs}`;
+  try {
+    const upstream_res = await fetch(upstream, {
+      headers: { 'Accept': 'application/json', 'User-Agent': 'kaspa-disperse/1.0' },
+    });
+    const body = await upstream_res.text();
+    res.status(upstream_res.status).set('Content-Type', 'application/json').send(body);
+  } catch (err: any) {
+    res.status(502).json({ error: `Kasplex proxy error: ${err.message}` });
+  }
+});
 
 // ── Fee constants ─────────────────────────────────────────────────────────────
 // Covenant transactions with large redeemScripts have significant mass.

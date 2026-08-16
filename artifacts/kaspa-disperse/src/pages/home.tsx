@@ -181,9 +181,9 @@ export default function Home() {
               state: String(b.state ?? ''),
             }));
         })(),
-        // 2. Kasplex (KRC-20)
+        // 2. Kasplex (KRC-20) — proxied through our API server to avoid 403 from direct browser requests
         (async () => {
-          const res = await fetch(`${KASPLEX_API}/krc20/address/${encodeURIComponent(address)}/tokenlist`);
+          const res = await fetch(`/api/kron/kasplex/krc20/address/${encodeURIComponent(address)}/tokenlist`);
           const data = await res.json();
           return ((data?.result ?? []) as any[])
             .filter((b: any) => b.tick && BigInt(b.balance ?? '0') > 0n)
