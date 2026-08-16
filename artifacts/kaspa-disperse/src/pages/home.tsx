@@ -1105,11 +1105,8 @@ export default function Home() {
                 <div className="text-xs font-medium text-zinc-400">Batch Queue</div>
                 {batches.map((b, idx) => {
                   const status = batchStatuses[idx] || { status: 'pending' };
-                  const isKcc20 = mode === 'krc20' && tokenInfo?.state === 'kcc-20';
                   const accentColor = mode === 'krc20' ? 'text-violet-400' : 'text-emerald-400';
-                  const explorerBase = isKcc20
-                    ? 'https://explorer.kaspa.org/txs/'
-                    : 'https://explorer.kaspa.org/txs/';
+                  const isKcc20 = mode === 'krc20' && tokenInfo?.state === 'kcc-20';
 
                   return (
                     <div
@@ -1121,15 +1118,25 @@ export default function Home() {
                           Batch #{idx + 1} ({b.length} {mode === 'krc20' ? 'transfers' : 'outputs'})
                         </div>
                         {status.txId && (
-                          <a
-                            href={`${explorerBase}${status.txId}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className={`text-[11px] ${accentColor} hover:underline flex items-center gap-1 mt-0.5`}
-                          >
-                            {isKcc20 ? 'View on Kaspa explorer' : `Tx: ${status.txId.slice(0, 12)}…`}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
+                          isKcc20 ? (
+                            <a
+                              href={`https://kron.technology/token/${tokenInfo?.tick}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className={`text-[11px] ${accentColor} hover:underline flex items-center gap-1 mt-0.5`}
+                            >
+                              View on Kron <ExternalLink className="h-3 w-3" />
+                            </a>
+                          ) : (
+                            <a
+                              href={`https://explorer.kaspa.org/txs/${status.txId}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className={`text-[11px] ${accentColor} hover:underline flex items-center gap-1 mt-0.5`}
+                            >
+                              Tx: {status.txId.slice(0, 12)}… <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )
                         )}
                         {status.error && (
                           <span className="text-[11px] text-red-400 block mt-0.5">{status.error}</span>
