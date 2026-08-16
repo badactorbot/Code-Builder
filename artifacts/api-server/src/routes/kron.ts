@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { blake2b } from '@noble/hashes/blake2.js';
+import { estimateTransactionFee } from '../lib/kcc20-fee.js';
 
 const router = Router();
 
-const KRON_IDX = 'https://idx.kron.technology';
-const KASPA_API = 'https://api.kaspa.org';
+const KRON_IDX   = 'https://idx.kron.technology';
+const KASPA_API  = 'https://api.kaspa.org';
 const KASPLEX_API = 'https://api.kasplex.org/v1';
 
 // ── Bech32 helpers (same charset as kaspa.ts) ────────────────────────────────
@@ -133,36 +134,34 @@ function encodeKaspaAddress(version: number, hash: Uint8Array, prefix = 'kaspa')
   return `${prefix}:${s}`;
 }
 
-// ── Kasplex proxy ─────────────────────────────────────────────────────────────
-// api.kasplex.org blocks direct browser requests (CORS / rate-limit → 403).
-// All Kasplex calls from the frontend must go through this proxy.
-
-router.get('/kasplex/*path', async (req, res) => {
-  const subpath = Array.isArray(req.params.path) ? req.params.path.join('/') : (req.params as any).path as string;
-  const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-  const upstream = `${KASPLEX_API}/${subpath}${qs}`;
-  try {
-    const upstream_res = await fetch(upstream, {
-      headers: { 'Accept': 'application/json', 'User-Agent': 'kaspa-disperse/1.0' },
-    });
-    const body = await upstream_res.text();
-    res.status(upstream_res.status).set('Content-Type', 'application/json').send(body);
-  } catch (err: any) {
-    res.status(502).json({ error: `Kasplex proxy error: ${err.message}` });
-  }
-});
-
-// ── Fee constants ─────────────────────────────────────────────────────────────
-// Covenant transactions with large redeemScripts have significant mass.
-// Use a conservative fixed fee of 0.05 KAS to ensure relay acceptance.
-const KCC20_FEE_SOMPI = 5_000_000n; // 0.05 KAS
+// ── Fee constant ──────────────────────────────────────────────────────────────
 
 // Every KRON covenant UTXO carries a fixed 0.5 KAS regardless of token amount
 // (the token amount lives in the redeemScript state, not in the output value).
 // Verified against on-chain data: all holder UTXOs = 50,000,000 sompi.
 const COVENANT_OUTPUT_SOMPI = 50_000_000n; // 0.5 KAS
 
+// estimateTransactionFee is imported from ../lib/kcc20-fee.js
+
 // ── Routes ───────────────────────────────────────────────────────────────────
+
+// Proxy for Kasplex KRC-20 indexer — api.kasplex.org blocks direct browser
+// requests (CORS / rate-limit → 403). All Kasplex calls must go through here.
+router.get('/kasplex/*path', async (req, res) => {
+  const subpath = Array.isArray(req.params.path)
+    ? req.params.path.join('/')
+    : (req.params as any).path as string;
+  const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  try {
+    const upstream_res = await fetch(`${KASPLEX_API}/${subpath}${qs}`, {
+      headers: { 'Accept': 'application/json', 'User-Agent': 'kaspa-disperse/1.0' },
+    });
+    const body = await upstream_res.text();
+    res.status(upstream_res.status).set('Content-Type', 'application/json').send(body);
+  } catch (err: any) {
+    res.status(502).json({ error: `Kasplex proxy error: ${err?.message}` });
+  }
+});
 
 // Proxy for Kron KCC-20 indexer — CORS on idx.kron.technology is locked
 // to kron.technology only, so the browser cannot call it directly.
@@ -314,35 +313,98 @@ router.post('/build-kcc20-transfer', async (req, res) => {
       return diff > 0n ? 1 : diff < 0n ? -1 : 0;
     });
 
-    // ── 6. Determine required KAS ─────────────────────────────────────────
+    // ── 6. Determine required KAS (dynamic fee) ───────────────────────────
     // Every covenant output must carry 0.5 KAS. Covenant inputs contribute
     // their own 0.5 KAS each, so the sender's KAS UTXOs must cover:
     //   fee + (covenant outputs × 0.5 KAS) − (covenant inputs' sompi)
+    //
+    // The fee depends on the number of inputs, which depends on the fee — so
+    // we iterate: start with zero KAS inputs, select UTXOs to cover the
+    // requirement, recompute fee with actual count, repeat. Converges in ≤ 3
+    // passes for typical dispersals; MAX_PASSES is a safety cap.
     const changeAmount = selectedTotal - totalNeeded;
     const numCovenantOutputs = recipients.length + (changeAmount > 0n ? 1 : 0);
     const covenantOutSompi = BigInt(numCovenantOutputs) * COVENANT_OUTPUT_SOMPI;
-    const requiredKas = KCC20_FEE_SOMPI + covenantOutSompi - covenantInSompi;
+
+    // redeemScript length is constant for all KRON UTXOs of the same version.
+    const redeemScriptLen = template.length;
 
     let feeUtxos: any[] = [];
     let feeTotal = 0n;
+    let dynamicFee = 0n;
 
-    if (requiredKas > 0n) {
+    // Iterate until the selected input count is stable (fixed point).
+    // Each pass computes the fee for the count selected in the PREVIOUS pass,
+    // then re-selects to cover the new requirement. When the count no longer
+    // changes, the loop has converged.
+    const MAX_PASSES = 20;
+    for (let pass = 0; pass < MAX_PASSES; pass++) {
+      const prevCount = feeUtxos.length;
+
+      // Conservative: always assume a KAS change output exists for fee estimation.
+      // (It is omitted from the tx only when kasChange === 0, an unlikely edge case.)
+      const numOutputsEst = numCovenantOutputs + 1;
+
+      dynamicFee = estimateTransactionFee(
+        covenantEntries.length,
+        redeemScriptLen,
+        feeUtxos.length,     // 0 on first pass → grows each round as needed
+        numOutputsEst,
+      );
+
+      const requiredKas = dynamicFee + covenantOutSompi - covenantInSompi;
+
+      if (requiredKas <= 0n) {
+        // Covenant inputs carry enough KAS to fund the fee and all outputs —
+        // no extra KAS UTXOs needed.
+        feeUtxos = [];
+        feeTotal = 0n;
+        break;
+      }
+
+      // Re-select KAS UTXOs to cover the updated requirement.
+      feeUtxos = [];
+      feeTotal = 0n;
       const singleFeeUtxo = sortedKas.find((u: any) => BigInt(u.utxoEntry?.amount ?? 0) >= requiredKas);
       if (singleFeeUtxo) {
         feeUtxos = [singleFeeUtxo];
         feeTotal = BigInt(singleFeeUtxo.utxoEntry?.amount ?? 0);
       } else {
-        // Combine multiple UTXOs until we cover the requirement
         for (const u of sortedKas) {
           feeUtxos.push(u);
           feeTotal += BigInt(u.utxoEntry?.amount ?? 0);
           if (feeTotal >= requiredKas) break;
         }
-        if (feeTotal < requiredKas) {
-          return res.status(400).json({
-            error: `Insufficient KAS — need ≥${Number(requiredKas) / 1e8} KAS (fee + 0.5 KAS per covenant output), have ${Number(feeTotal) / 1e8} KAS`,
-          });
-        }
+      }
+
+      if (feeTotal < requiredKas) {
+        return res.status(400).json({
+          error: `Insufficient KAS — need ≥${Number(requiredKas) / 1e8} KAS (fee + 0.5 KAS per covenant output), have ${Number(feeTotal) / 1e8} KAS`,
+        });
+      }
+
+      // Converged when the UTXO count is stable.
+      if (feeUtxos.length === prevCount) break;
+    }
+
+    // ── Mandatory post-loop fixed-point verification ───────────────────────
+    // Recompute the fee for the ACTUAL final input/output counts. This is
+    // necessary because the loop may exit (via convergence OR the MAX_PASSES
+    // cap) with dynamicFee reflecting the previous iteration's count rather
+    // than the count that was ultimately selected.
+    {
+      const numOutputsFinal = numCovenantOutputs + 1; // conservative: include KAS change
+      dynamicFee = estimateTransactionFee(
+        covenantEntries.length,
+        redeemScriptLen,
+        feeUtxos.length,
+        numOutputsFinal,
+      );
+      const requiredFinal = dynamicFee + covenantOutSompi - covenantInSompi;
+      if (requiredFinal > 0n && feeTotal < requiredFinal) {
+        return res.status(400).json({
+          error: `Insufficient KAS — need ≥${Number(requiredFinal) / 1e8} KAS (fee + 0.5 KAS per covenant output), have ${Number(feeTotal) / 1e8} KAS`,
+        });
       }
     }
 
@@ -373,7 +435,7 @@ router.post('/build-kcc20-transfer', async (req, res) => {
     // ── 9. KAS change back to sender ──────────────────────────────────────
     const senderP2pkScript = '20' + Buffer.from(senderPubkey).toString('hex') + 'ac';
     // KAS change = everything in minus everything out minus fee
-    const kasChange = feeTotal + covenantInSompi - covenantOutSompi - KCC20_FEE_SOMPI;
+    const kasChange = feeTotal + covenantInSompi - covenantOutSompi - dynamicFee;
 
     // ── 10. Assemble Transaction JSON (kaspa-wasm serializeToSafeJSON format) ─
     // This format is what kasware.signPskt expects.
@@ -462,7 +524,7 @@ router.post('/build-kcc20-transfer', async (req, res) => {
     return res.json({
       txJsonString: JSON.stringify(txJson),
       inputIndicesToSign,
-      fee: String(KCC20_FEE_SOMPI),
+      fee: String(dynamicFee),
       totalAmount: String(totalNeeded),
     });
   } catch (err: any) {

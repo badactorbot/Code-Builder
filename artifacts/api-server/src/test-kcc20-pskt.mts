@@ -18,7 +18,6 @@ const RECIPIENT = 'kaspa:qr3v84f384hvfrh09uaae70ww2u03qn2rruq7dm8hz9gw7a3klaxj9p
 const API_BASE  = process.env.API_URL ?? 'http://localhost:' + (process.env.PORT ?? '3001');
 
 const COVENANT_OUTPUT_SOMPI = 50_000_000n; // 0.5 KAS — fixed value for every covenant UTXO
-const KCC20_FEE_SOMPI       =  5_000_000n; // 0.05 KAS
 
 // ── Re-derive P2SH SPK from redeemScript for cross-check ────────────────────
 function blake2b256(data: Uint8Array): Uint8Array {
@@ -63,7 +62,7 @@ async function main() {
   assert.ok(typeof body.txJsonString === 'string', 'txJsonString must be a string');
   assert.ok(Array.isArray(body.inputIndicesToSign), 'inputIndicesToSign must be an array');
   assert.ok(typeof body.fee === 'string', 'fee must be a string');
-  assert.equal(body.fee, String(KCC20_FEE_SOMPI), `fee must be ${KCC20_FEE_SOMPI}`);
+  assert.ok(BigInt(body.fee) > 0n, `fee must be positive, got ${body.fee}`);
   assert.equal(body.totalAmount, '10', 'totalAmount must equal sum of recipient amounts');
   console.log('   ✓ fee =', body.fee, '  totalAmount =', body.totalAmount);
 
@@ -160,13 +159,15 @@ async function main() {
   }
   console.log('   ✓ all', tx.outputs.length, 'outputs pass schema check;', p2shOutputs.length, 'P2SH outputs carry 0.5 KAS each');
 
-  // ── 7. Fee conservation (inSum − outSum = KCC20_FEE_SOMPI) ───────────────
+  // ── 7. Fee conservation (inSum − outSum = returned fee) ───────────────────
   console.log('7. Verifying fee conservation…');
   const inSum  = tx.inputs.reduce((s: bigint, i: any) => s + BigInt(i.utxoEntry.amount), 0n);
   const outSum = tx.outputs.reduce((s: bigint, o: any) => s + BigInt(o.value), 0n);
   const impliedFee = inSum - outSum;
-  assert.equal(impliedFee, KCC20_FEE_SOMPI,
-    `fee must equal ${KCC20_FEE_SOMPI} sompi — inSum(${inSum}) − outSum(${outSum}) = ${impliedFee}`);
+  const returnedFee = BigInt(body.fee);
+  assert.equal(impliedFee, returnedFee,
+    `implied fee (inSum − outSum = ${impliedFee}) must equal returned fee (${returnedFee})`);
+  assert.ok(impliedFee > 0n, `fee must be positive`);
   console.log(`   ✓ inSum ${inSum} − outSum ${outSum} = fee ${impliedFee} ✓`);
 
   // ── 8. inputIndicesToSign coverage ───────────────────────────────────────

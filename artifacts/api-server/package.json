@@ -8,7 +8,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:pskt": "node --import tsx/esm src/test-kcc20-pskt.mts"
+    "test:pskt": "node --import tsx/esm src/test-kcc20-pskt.mts",
+    "test:fee": "node --import tsx/esm src/test-fee-selection.mts"
   },
   "dependencies": {
     "@noble/hashes": "^2.3.0",
