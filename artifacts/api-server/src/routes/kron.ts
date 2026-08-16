@@ -332,28 +332,45 @@ router.post('/build-kcc20-transfer', async (req, res) => {
     let feeUtxos: any[] = [];
     let feeTotal = 0n;
     let dynamicFee = 0n;
+    // Best estimate of the KAS-change output value for storage-mass calculation.
+    // Starts at COVENANT_OUTPUT_SOMPI (0.5 KAS); refined each pass so KIP-0009
+    // storage mass reflects the real output value rather than a fixed placeholder.
+    let changeEst = COVENANT_OUTPUT_SOMPI;
+    // Sticky fold flag: once we decide the change output cannot pay its own
+    // incremental relay cost (or the inputs cannot fund the with-change tx),
+    // we permanently switch to the output-less path.
+    let omitChange = false;
 
-    // Iterate until the selected input count is stable (fixed point).
-    // Each pass computes the fee for the count selected in the PREVIOUS pass,
-    // then re-selects to cover the new requirement. When the count no longer
-    // changes, the loop has converged.
-    const MAX_PASSES = 20;
+    /** Helper: select KAS UTXOs to meet a sompi requirement. */
+    function selectKasUtxos(required: bigint): { utxos: any[]; total: bigint } {
+      if (required <= 0n) return { utxos: [], total: 0n };
+      const single = sortedKas.find((u: any) => BigInt(u.utxoEntry?.amount ?? 0) >= required);
+      if (single) return { utxos: [single], total: BigInt(single.utxoEntry?.amount ?? 0) };
+      let utxos: any[] = [], total = 0n;
+      for (const u of sortedKas) {
+        utxos.push(u);
+        total += BigInt(u.utxoEntry?.amount ?? 0);
+        if (total >= required) break;
+      }
+      return { utxos, total };
+    }
+
+    // Iterate until UTXO count, fold decision, and change estimate are stable.
+    const MAX_PASSES = 30;
     for (let pass = 0; pass < MAX_PASSES; pass++) {
-      const prevCount = feeUtxos.length;
+      const prevCount              = feeUtxos.length;
+      const prevChangeEst          = changeEst;
+      const prevOmitChange: boolean = omitChange;
 
-      // Conservative: always assume a KAS change output exists for fee estimation.
-      // (It is omitted from the tx only when kasChange === 0, an unlikely edge case.)
-      // Covenant outputs each carry a fixed 0.5 KAS; use the same value as a
-      // placeholder for the KAS-change output (its real value is unknown here
-      // but will be ≥ 0.5 KAS in normal operation, so this is conservative).
       const kasInputValuesEst = feeUtxos.map((u: any) => BigInt(u.utxoEntry?.amount ?? 0));
-      const outputValuesEst   = Array<bigint>(numCovenantOutputs + 1).fill(COVENANT_OUTPUT_SOMPI);
 
+      // Estimate fee for the current candidate (with or without change output).
+      const outputValuesEst: bigint[] = [
+        ...Array<bigint>(numCovenantOutputs).fill(COVENANT_OUTPUT_SOMPI),
+        ...(!omitChange && changeEst > 0n ? [changeEst] : []),
+      ];
       dynamicFee = estimateTransactionFee(
-        covenantEntries.length,
-        redeemScriptLen,
-        kasInputValuesEst,   // actual sompi per KAS fee input (empty on first pass)
-        outputValuesEst,     // covenant outputs + 1 conservative KAS-change placeholder
+        covenantEntries.length, redeemScriptLen, kasInputValuesEst, outputValuesEst,
       );
 
       const requiredKas = dynamicFee + covenantOutSompi - covenantInSompi;
@@ -363,54 +380,103 @@ router.post('/build-kcc20-transfer', async (req, res) => {
         // no extra KAS UTXOs needed.
         feeUtxos = [];
         feeTotal = 0n;
-        break;
-      }
-
-      // Re-select KAS UTXOs to cover the updated requirement.
-      feeUtxos = [];
-      feeTotal = 0n;
-      const singleFeeUtxo = sortedKas.find((u: any) => BigInt(u.utxoEntry?.amount ?? 0) >= requiredKas);
-      if (singleFeeUtxo) {
-        feeUtxos = [singleFeeUtxo];
-        feeTotal = BigInt(singleFeeUtxo.utxoEntry?.amount ?? 0);
       } else {
-        for (const u of sortedKas) {
-          feeUtxos.push(u);
-          feeTotal += BigInt(u.utxoEntry?.amount ?? 0);
-          if (feeTotal >= requiredKas) break;
+        // Try to select KAS UTXOs for the current path.
+        ({ utxos: feeUtxos, total: feeTotal } = selectKasUtxos(requiredKas));
+
+        if (feeTotal < requiredKas) {
+          if (omitChange) {
+            // Already on the no-change path — genuine insufficiency.
+            return res.status(400).json({
+              error: `Insufficient KAS — need ≥${Number(requiredKas) / 1e8} KAS (fee + 0.5 KAS per covenant output), have ${Number(feeTotal) / 1e8} KAS`,
+            });
+          }
+          // With-change path cannot be funded. Try the no-change path: the
+          // change output's relay cost is avoided, reducing the requirement.
+          const feeNC = estimateTransactionFee(
+            covenantEntries.length, redeemScriptLen, kasInputValuesEst,
+            Array<bigint>(numCovenantOutputs).fill(COVENANT_OUTPUT_SOMPI),
+          );
+          const requiredNC = feeNC + covenantOutSompi - covenantInSompi;
+          const sel = selectKasUtxos(requiredNC > 0n ? requiredNC : 0n);
+          if (sel.total >= (requiredNC > 0n ? requiredNC : 0n)) {
+            // No-change path is viable — switch permanently.
+            omitChange = true;
+            changeEst  = 0n;
+            dynamicFee = feeNC;
+            feeUtxos   = sel.utxos;
+            feeTotal   = sel.total;
+          } else {
+            return res.status(400).json({
+              error: `Insufficient KAS — need ≥${Number(requiredKas) / 1e8} KAS (fee + 0.5 KAS per covenant output), have ${Number(feeTotal) / 1e8} KAS`,
+            });
+          }
         }
       }
 
-      if (feeTotal < requiredKas) {
-        return res.status(400).json({
-          error: `Insufficient KAS — need ≥${Number(requiredKas) / 1e8} KAS (fee + 0.5 KAS per covenant output), have ${Number(feeTotal) / 1e8} KAS`,
-        });
+      // Determine the updated change estimate and check the dynamic fold condition.
+      if (!omitChange) {
+        const rawChange = feeTotal + covenantInSompi - covenantOutSompi - dynamicFee;
+        if (rawChange <= 0n) {
+          omitChange = true;
+          changeEst  = 0n;
+        } else {
+          // Check whether the change output can cover its own incremental relay
+          // cost.  If not, fold it into the fee permanently.
+          const kasInputsForFold = feeUtxos.map((u: any) => BigInt(u.utxoEntry?.amount ?? 0));
+          const feeNC = estimateTransactionFee(
+            covenantEntries.length, redeemScriptLen, kasInputsForFold,
+            Array<bigint>(numCovenantOutputs).fill(COVENANT_OUTPUT_SOMPI),
+          );
+          const incrementalFee = dynamicFee > feeNC ? dynamicFee - feeNC : 0n;
+          if (rawChange <= incrementalFee) {
+            omitChange = true;
+            changeEst  = 0n;
+          } else {
+            changeEst = rawChange;
+          }
+        }
       }
 
-      // Converged when the UTXO count is stable.
-      if (feeUtxos.length === prevCount) break;
+      // Converge when UTXO count, fold decision, and change estimate are stable.
+      if (feeUtxos.length === prevCount && omitChange === prevOmitChange && changeEst === prevChangeEst) break;
     }
 
     // ── Mandatory post-loop fixed-point verification ───────────────────────
-    // Recompute the fee for the ACTUAL final input/output counts. This is
-    // necessary because the loop may exit (via convergence OR the MAX_PASSES
-    // cap) with dynamicFee reflecting the previous iteration's count rather
-    // than the count that was ultimately selected.
+    // Recompute the fee for the final input/output counts and change estimate.
+    // The loop may exit at MAX_PASSES with a stale dynamicFee; this ensures
+    // the verified fee is always consistent with the selected UTXOs.
     {
-      // Conservative: same placeholder approach as in the iteration loop.
       const kasInputValuesFinal = feeUtxos.map((u: any) => BigInt(u.utxoEntry?.amount ?? 0));
-      const outputValuesFinal   = Array<bigint>(numCovenantOutputs + 1).fill(COVENANT_OUTPUT_SOMPI);
+      const outputValuesFinal: bigint[] = [
+        ...Array<bigint>(numCovenantOutputs).fill(COVENANT_OUTPUT_SOMPI),
+        ...(!omitChange && changeEst > 0n ? [changeEst] : []),
+      ];
       dynamicFee = estimateTransactionFee(
-        covenantEntries.length,
-        redeemScriptLen,
-        kasInputValuesFinal,
-        outputValuesFinal,
+        covenantEntries.length, redeemScriptLen, kasInputValuesFinal, outputValuesFinal,
       );
       const requiredFinal = dynamicFee + covenantOutSompi - covenantInSompi;
       if (requiredFinal > 0n && feeTotal < requiredFinal) {
-        return res.status(400).json({
-          error: `Insufficient KAS — need ≥${Number(requiredFinal) / 1e8} KAS (fee + 0.5 KAS per covenant output), have ${Number(feeTotal) / 1e8} KAS`,
-        });
+        // Last resort: try the no-change path.
+        if (!omitChange) {
+          const feeNCFinal = estimateTransactionFee(
+            covenantEntries.length, redeemScriptLen, kasInputValuesFinal,
+            Array<bigint>(numCovenantOutputs).fill(COVENANT_OUTPUT_SOMPI),
+          );
+          const reqNCFinal = feeNCFinal + covenantOutSompi - covenantInSompi;
+          if (reqNCFinal <= 0n || feeTotal >= reqNCFinal) {
+            omitChange = true;
+            dynamicFee = feeNCFinal;
+          } else {
+            return res.status(400).json({
+              error: `Insufficient KAS — need ≥${Number(requiredFinal) / 1e8} KAS (fee + 0.5 KAS per covenant output), have ${Number(feeTotal) / 1e8} KAS`,
+            });
+          }
+        } else {
+          return res.status(400).json({
+            error: `Insufficient KAS — need ≥${Number(requiredFinal) / 1e8} KAS (fee + 0.5 KAS per covenant output), have ${Number(feeTotal) / 1e8} KAS`,
+          });
+        }
       }
     }
 
@@ -440,8 +506,18 @@ router.post('/build-kcc20-transfer', async (req, res) => {
 
     // ── 9. KAS change back to sender ──────────────────────────────────────
     const senderP2pkScript = '20' + Buffer.from(senderPubkey).toString('hex') + 'ac';
-    // KAS change = everything in minus everything out minus fee
-    const kasChange = feeTotal + covenantInSompi - covenantOutSompi - dynamicFee;
+    // The fold decision was made inside the iteration loop (omitChange flag).
+    // When omitChange is true the change output is suppressed; all surplus
+    // beyond the covenant outputs is donated to miners as fee.
+    let kasChange: bigint;
+    let effectiveFee: bigint;
+    if (omitChange) {
+      kasChange    = 0n;
+      effectiveFee = feeTotal + covenantInSompi - covenantOutSompi; // total surplus
+    } else {
+      kasChange    = feeTotal + covenantInSompi - covenantOutSompi - dynamicFee;
+      effectiveFee = dynamicFee;
+    }
 
     // ── 10. Assemble Transaction JSON (kaspa-wasm serializeToSafeJSON format) ─
     // This format is what kasware.signPskt expects.
@@ -530,7 +606,7 @@ router.post('/build-kcc20-transfer', async (req, res) => {
     return res.json({
       txJsonString: JSON.stringify(txJson),
       inputIndicesToSign,
-      fee: String(dynamicFee),
+      fee: String(effectiveFee),
       totalAmount: String(totalNeeded),
     });
   } catch (err: any) {
