@@ -103,7 +103,12 @@ function simulateFeeSelection(opts: {
     const prevCount = feeUtxos.length;
     const numOutputsEst = numCovenantOutputs + 1;
 
-    dynamicFee = estimateTransactionFee(numCovenantInputs, redeemScriptLen, feeUtxos.length, numOutputsEst);
+    dynamicFee = estimateTransactionFee(
+      numCovenantInputs,
+      redeemScriptLen,
+      feeUtxos.map(u => u.sompi),
+      Array<bigint>(numCovenantOutputs + 1).fill(COVENANT_OUTPUT_SOMPI),
+    );
 
     const requiredKas = dynamicFee + covenantOutSompi - covenantInSompi;
 
@@ -126,8 +131,12 @@ function simulateFeeSelection(opts: {
 
   // Post-loop fixed-point verification (mirrors route exactly).
   {
-    const numOutputsFinal = numCovenantOutputs + 1;
-    dynamicFee = estimateTransactionFee(numCovenantInputs, redeemScriptLen, feeUtxos.length, numOutputsFinal);
+    dynamicFee = estimateTransactionFee(
+      numCovenantInputs,
+      redeemScriptLen,
+      feeUtxos.map(u => u.sompi),
+      Array<bigint>(numCovenantOutputs + 1).fill(COVENANT_OUTPUT_SOMPI),
+    );
     const requiredFinal = dynamicFee + covenantOutSompi - covenantInSompi;
     if (requiredFinal > 0n && feeTotal < requiredFinal) {
       throw new Error(`Final coverage check failed: need ${requiredFinal}, have ${feeTotal}`);
@@ -253,8 +262,10 @@ test('10 small UTXOs — post-loop produces fee ≥ canonical min for actual cou
 test('per-KAS-input estimate matches canonical mass growth', () => {
   // Directly verify that adding one KAS input increases our estimate by at least
   // as much as kaspa-wasm says it should.
-  const baseline  = estimateTransactionFee(1, REDEEM_LEN, 1, 2);
-  const plusOneKas = estimateTransactionFee(1, REDEEM_LEN, 2, 2);
+  // Use a large sompi value so compute mass dominates (storage mass negligible).
+  const largeKasValue = 100_000_000n; // 1 KAS
+  const baseline   = estimateTransactionFee(1, REDEEM_LEN, [largeKasValue],                          Array<bigint>(2).fill(COVENANT_OUTPUT_SOMPI));
+  const plusOneKas = estimateTransactionFee(1, REDEEM_LEN, [largeKasValue, largeKasValue],            Array<bigint>(2).fill(COVENANT_OUTPUT_SOMPI));
   const estimateDelta = plusOneKas - baseline;
 
   // Canonical delta: one more input with 66-byte sig

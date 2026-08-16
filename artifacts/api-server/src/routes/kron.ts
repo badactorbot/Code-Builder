@@ -343,13 +343,17 @@ router.post('/build-kcc20-transfer', async (req, res) => {
 
       // Conservative: always assume a KAS change output exists for fee estimation.
       // (It is omitted from the tx only when kasChange === 0, an unlikely edge case.)
-      const numOutputsEst = numCovenantOutputs + 1;
+      // Covenant outputs each carry a fixed 0.5 KAS; use the same value as a
+      // placeholder for the KAS-change output (its real value is unknown here
+      // but will be ≥ 0.5 KAS in normal operation, so this is conservative).
+      const kasInputValuesEst = feeUtxos.map((u: any) => BigInt(u.utxoEntry?.amount ?? 0));
+      const outputValuesEst   = Array<bigint>(numCovenantOutputs + 1).fill(COVENANT_OUTPUT_SOMPI);
 
       dynamicFee = estimateTransactionFee(
         covenantEntries.length,
         redeemScriptLen,
-        feeUtxos.length,     // 0 on first pass → grows each round as needed
-        numOutputsEst,
+        kasInputValuesEst,   // actual sompi per KAS fee input (empty on first pass)
+        outputValuesEst,     // covenant outputs + 1 conservative KAS-change placeholder
       );
 
       const requiredKas = dynamicFee + covenantOutSompi - covenantInSompi;
@@ -393,12 +397,14 @@ router.post('/build-kcc20-transfer', async (req, res) => {
     // cap) with dynamicFee reflecting the previous iteration's count rather
     // than the count that was ultimately selected.
     {
-      const numOutputsFinal = numCovenantOutputs + 1; // conservative: include KAS change
+      // Conservative: same placeholder approach as in the iteration loop.
+      const kasInputValuesFinal = feeUtxos.map((u: any) => BigInt(u.utxoEntry?.amount ?? 0));
+      const outputValuesFinal   = Array<bigint>(numCovenantOutputs + 1).fill(COVENANT_OUTPUT_SOMPI);
       dynamicFee = estimateTransactionFee(
         covenantEntries.length,
         redeemScriptLen,
-        feeUtxos.length,
-        numOutputsFinal,
+        kasInputValuesFinal,
+        outputValuesFinal,
       );
       const requiredFinal = dynamicFee + covenantOutSompi - covenantInSompi;
       if (requiredFinal > 0n && feeTotal < requiredFinal) {
