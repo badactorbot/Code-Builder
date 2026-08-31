@@ -2,3 +2,4 @@
 - [KRC-20 disperse via KasWare native API](krc20-kasware-api.md) — Use kasware.krc20BatchTransferTransaction() for KRC-20 bulk sends; no server-side work needed.
 - [KCC-20 covenant dispersal](kcc20-covenant-dispersal.md) — Full implementation: blake2b via @noble/hashes/blake2.js, signPskt format differs from signKaspaTransaction, Kaspa tx API field is accepting_block_blue_score.
 - [Static frontend rebuild](static-frontend-rebuild.md) — published app serves dist/public; frontend fixes need `PORT=22434 BASE_PATH=/ pnpm run build` in artifacts/kaspa-disperse to reach published users.
+- [KAS wallet-managed sending](kas-only-sendkaspa.md) — one sendKaspa call per recipient with orphan retries is the reliable public KAS dispersal flow.
