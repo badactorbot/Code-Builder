@@ -50,7 +50,8 @@ const KASPA_WALLETS = [
   },
 ];
 
-const BATCH_SIZE = 50;
+const SERVICE_FEE_KAS = 100;
+const SERVICE_FEE_ADDRESS = 'kaspa:qz6dltvkds80wf8raac504ze4nesgnk72n24jr7krum2m8dq34khvkevr88cc';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Recipient {
@@ -83,6 +84,7 @@ export default function Home() {
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<TransferStatus[]>([]);
+  const [serviceFeeStatus, setServiceFeeStatus] = useState<TransferStatus>({ status: 'pending', txId: '' });
   const [isProcessing, setIsProcessing] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -126,6 +128,7 @@ export default function Home() {
     setRecipients(parsed);
     setParseErrors(errors);
     setStatuses(parsed.map(() => ({ status: 'pending', txId: '' })));
+    setServiceFeeStatus({ status: 'pending', txId: '' });
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -173,65 +176,81 @@ export default function Home() {
       return;
     }
 
+    const confirmed = window.confirm(
+      `This dispersal will send ${SERVICE_FEE_KAS} KAS to the service address after all recipient transfers complete. ` +
+      `The fee is charged once per dispersal, regardless of the number of recipients. Continue?`,
+    );
+    if (!confirmed) return;
+
     setIsProcessing(true);
     const newStatuses: TransferStatus[] = recipients.map(() => ({ status: 'pending', txId: '' }));
     setStatuses([...newStatuses]);
+
+    const sendWithRetry = async (
+      address: string,
+      amount: number,
+      onProgress: (status: TransferStatus) => void,
+    ): Promise<{ txId?: string; error?: string }> => {
+      const MAX_RETRIES = 5;
+
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        if (attempt > 0) {
+          const waitMs = attempt * 2000;
+          onProgress({
+            status: 'signing',
+            txId: '',
+            error: `Orphan retry ${attempt}/${MAX_RETRIES - 1} — waiting ${waitMs / 1000}s…`,
+          });
+          await new Promise((res) => setTimeout(res, waitMs));
+          onProgress({ status: 'signing', txId: '' });
+        }
+
+        try {
+          const raw = await provider.sendKaspa(address, Math.round(amount * 1e8));
+          return { txId: typeof raw === 'string' ? raw : (raw?.txId ?? raw?.id ?? '') };
+        } catch (err: any) {
+          const message = err?.message ?? 'Rejected';
+          if (!message.toLowerCase().includes('orphan') || attempt === MAX_RETRIES - 1) {
+            return { error: message };
+          }
+        }
+      }
+
+      return { error: 'Transaction failed after retrying.' };
+    };
 
     for (let i = 0; i < recipients.length; i++) {
       const { address, amount } = recipients[i];
       newStatuses[i] = { status: 'signing', txId: '' };
       setStatuses([...newStatuses]);
 
-      // Kaspa rejects a tx that spends unconfirmed change from the previous tx
-      // ("orphan disallowed"). Retry up to 5× with increasing waits to let the
-      // previous transaction settle into the DAG (~1 block per second).
-      const MAX_RETRIES = 5;
-      let lastErr: any = null;
-      let txId = '';
-      let succeeded = false;
-
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        if (attempt > 0) {
-          // 2 s, 4 s, 6 s, 8 s — enough for the previous UTXO to confirm
-          const waitMs = attempt * 2000;
-          newStatuses[i] = {
-            status: 'signing',
-            txId: '',
-            error: `Orphan retry ${attempt}/${MAX_RETRIES - 1} — waiting ${waitMs / 1000}s…`,
-          };
-          setStatuses([...newStatuses]);
-          await new Promise((res) => setTimeout(res, waitMs));
-          newStatuses[i] = { status: 'signing', txId: '' };
-          setStatuses([...newStatuses]);
-        }
-
-        try {
-          const sompi = Math.round(amount * 1e8);
-          const raw = await provider.sendKaspa(address, sompi);
-          txId = typeof raw === 'string' ? raw : (raw?.txId ?? raw?.id ?? '');
-          succeeded = true;
-          break;
-        } catch (err: any) {
-          lastErr = err;
-          const msg: string = err?.message ?? '';
-          // Only retry on orphan errors; surface anything else immediately
-          if (!msg.toLowerCase().includes('orphan')) break;
-        }
-      }
-
-      if (succeeded) {
-        newStatuses[i] = { status: 'sent', txId };
+      const result = await sendWithRetry(address, amount, (status) => {
+        newStatuses[i] = status;
         setStatuses([...newStatuses]);
-        // Brief pause between sends to let the wallet's UTXO state settle
-        if (i < recipients.length - 1) await new Promise((res) => setTimeout(res, 1500));
+      });
+
+      if (!result.error) {
+        newStatuses[i] = { status: 'sent', txId: result.txId ?? '' };
+        setStatuses([...newStatuses]);
+        // Let the wallet's UTXO state settle before the next transfer.
+        await new Promise((res) => setTimeout(res, 1500));
       } else {
-        newStatuses[i] = { status: 'failed', txId: '', error: lastErr?.message ?? 'Rejected' };
+        newStatuses[i] = { status: 'failed', txId: '', error: result.error };
         setStatuses([...newStatuses]);
         setIsProcessing(false);
         return;
       }
     }
 
+    // Charge the fixed service fee once, after all recipient transfers succeed.
+    setServiceFeeStatus({ status: 'signing', txId: '' });
+    const feeResult = await sendWithRetry(SERVICE_FEE_ADDRESS, SERVICE_FEE_KAS, setServiceFeeStatus);
+    if (feeResult.error) {
+      setServiceFeeStatus({ status: 'failed', txId: '', error: feeResult.error });
+      setIsProcessing(false);
+      return;
+    }
+    setServiceFeeStatus({ status: 'sent', txId: feeResult.txId ?? '' });
     setIsProcessing(false);
   };
 
@@ -240,6 +259,7 @@ export default function Home() {
   const failedCount = statuses.filter(s => s.status === 'failed').length;
   const pendingCount = statuses.filter(s => s.status === 'pending').length;
   const signingIdx = statuses.findIndex(s => s.status === 'signing');
+  const isFeeSigning = serviceFeeStatus.status === 'signing';
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -318,7 +338,7 @@ export default function Home() {
 
             <div className="text-xs text-zinc-500 flex justify-between">
               <span>Format: <code className="text-zinc-400">address amount</code> or <code className="text-zinc-400">address,amount</code></span>
-              <span>≤{BATCH_SIZE} per batch</span>
+              <span>No recipient limit</span>
             </div>
 
             {parseErrors.length > 0 && (
@@ -357,11 +377,23 @@ export default function Home() {
               </div>
             </div>
 
+            <div className="rounded-xl bg-amber-950/30 border border-amber-700/50 p-3 text-xs text-amber-300">
+              <div className="flex items-center justify-between font-semibold">
+                <span>Service fee</span>
+                <span>{SERVICE_FEE_KAS} KAS</span>
+              </div>
+              <div className="text-amber-400/80 mt-1">
+                One-time fee per dispersal, regardless of recipient or transaction count.
+              </div>
+            </div>
+
             {/* Progress during send */}
-            {isProcessing && signingIdx !== -1 && (
+            {isProcessing && (signingIdx !== -1 || isFeeSigning) && (
               <div className="rounded-xl bg-amber-950/30 border border-amber-700/40 p-3 text-xs text-amber-300 flex items-center gap-2">
                 <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-                Sending {signingIdx + 1} of {recipients.length} — approve in wallet…
+                {isFeeSigning
+                  ? `Approving ${SERVICE_FEE_KAS} KAS service fee in wallet…`
+                  : `Sending ${signingIdx + 1} of ${recipients.length} — approve in wallet…`}
               </div>
             )}
 
@@ -416,6 +448,46 @@ export default function Home() {
                     </div>
                   );
                 })}
+
+                <div className="flex items-center justify-between rounded-xl bg-amber-950/20 border border-amber-800/50 px-3 py-2.5 text-xs">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-amber-300">Service fee</div>
+                    <div className="font-mono text-amber-400/70 truncate text-[10px]">
+                      {SERVICE_FEE_ADDRESS.slice(0, 16)}…{SERVICE_FEE_ADDRESS.slice(-6)}
+                    </div>
+                    {serviceFeeStatus.txId && (
+                      <a
+                        href={`https://explorer.kaspa.org/txs/${serviceFeeStatus.txId}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-amber-400 hover:underline flex items-center gap-1 mt-0.5"
+                      >
+                        {serviceFeeStatus.txId.slice(0, 10)}… <ExternalLink className="h-2.5 w-2.5" />
+                      </a>
+                    )}
+                    {serviceFeeStatus.error && (
+                      <div className="text-[10px] text-red-400 mt-0.5">{serviceFeeStatus.error}</div>
+                    )}
+                  </div>
+                  <div className="shrink-0 ml-2">
+                    {serviceFeeStatus.status === 'pending' && <span className="text-zinc-500">After transfers</span>}
+                    {serviceFeeStatus.status === 'signing' && (
+                      <span className="text-amber-400 flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Approve
+                      </span>
+                    )}
+                    {serviceFeeStatus.status === 'sent' && (
+                      <span className="text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Sent
+                      </span>
+                    )}
+                    {serviceFeeStatus.status === 'failed' && (
+                      <span className="text-red-400 flex items-center gap-1">
+                        <AlertCircle className="h-3.5 w-3.5" /> Failed
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -432,7 +504,7 @@ export default function Home() {
               {isProcessing ? (
                 <><Loader2 className="h-4 w-4 animate-spin" /> Sending… ({pendingCount} remaining)</>
               ) : (
-                <><Send className="h-4 w-4" /> Send KAS</>
+                <><Send className="h-4 w-4" /> Send KAS + {SERVICE_FEE_KAS} KAS Fee</>
               )}
             </button>
 
