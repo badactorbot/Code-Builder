@@ -1,10 +1,10 @@
 ---
-name: KAS wallet-managed sending
-description: The confirmed reliable approach for native KAS dispersals.
+name: KAS single-approval dispersal
+description: The validated KasWare Safe JSON contract for one atomic multi-output KAS dispersal.
 ---
 
-Use the connected wallet's `sendKaspa()` for each recipient rather than assembling multi-output transactions or manually selecting UTXOs.
+Build one multi-output Safe JSON transaction containing every recipient, the fixed service-fee output, and sender change; sign once with KasWare `signPskt` using Sighash All, then broadcast the returned string unchanged with `pushTx`.
 
-**Why:** A wallet-managed single-recipient send avoids server-side transaction-format mismatches and lets the wallet choose valid inputs. Sequential sends can briefly encounter Kaspa's orphan-disallowed response when a later send tries to spend fresh change, so the flow needs a short delay and retry handling for orphan errors.
+**Why:** KasWare's documented Safe JSON uses flat `transactionId`/`index` input fields, serialized script public keys, string amounts, and an explicit mass. This format passed a mocked end-to-end wallet flow, while the older per-recipient `sendKaspa` flow required repeated approvals.
 
-**How to apply:** Preserve this approach for native KAS dispersal changes. Keep token/covenant transaction code separate from the KAS-only flow.
+**How to apply:** Fetch authoritative UTXOs, exclude mempool-spent outpoints, calculate mass and relay fee from the final input/output counts, and reject transactions above the 100,000 standard-mass ceiling. Do not convert the wallet's signed JSON through the REST broadcast schema.

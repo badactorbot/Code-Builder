@@ -1,6 +1,14 @@
 import { Router } from 'express';
+import {
+  MassCalculator,
+  NetworkId,
+  ScriptPublicKey,
+  getConsensusParametersByNetwork,
+} from 'kaspa-wasm';
 
 const router = Router();
+const SERVICE_FEE_SOMPI = 10_000_000_000n;
+const SERVICE_FEE_ADDRESS = 'kaspa:qz6dltvkds80wf8raac504ze4nesgnk72n24jr7krum2m8dq34khvkevr88cc';
 
 // ---------------------------------------------------------------------------
 // Kaspa bech32 address → P2PK scriptPublicKey (pure JS, no kaspa-wasm needed)
@@ -69,6 +77,168 @@ function estimateFee(numInputs: number, numOutputs: number): bigint {
   const mass = 239n + BigInt(numInputs) * 642n + BigInt(numOutputs) * 365n;
   return ((mass + 999n) / 1000n) * 1000n; // ceil to nearest 1000 sompi
 }
+
+function safeScript(script: string): string {
+  return `0000${script}`;
+}
+
+function parseKasAmount(value: unknown): bigint {
+  const text = String(value ?? '').trim();
+  if (!/^\d+(?:\.\d{1,8})?$/.test(text)) throw new Error(`Invalid KAS amount "${text}"`);
+  const [whole, fraction = ''] = text.split('.');
+  return BigInt(whole) * 100_000_000n + BigInt(fraction.padEnd(8, '0'));
+}
+
+function calculateP2pkMass(inputCount: number, outputScripts: string[]): number {
+  const cp = (getConsensusParametersByNetwork as any)(new NetworkId('mainnet'));
+  const calculator = new MassCalculator(cp);
+  const inputScript = new ScriptPublicKey(0, '20' + '00'.repeat(32) + 'ac');
+  const inputs = Array.from({ length: inputCount }, (_, index) => ({
+    previousOutpoint: { transactionId: '0'.repeat(64), index },
+    signatureScript: '00'.repeat(66),
+    sequence: 0n,
+    sigOpCount: 1,
+    utxoEntry: {
+      amount: 1_000_000n,
+      scriptPublicKey: inputScript,
+      blockDaaScore: 1n,
+      isCoinbase: false,
+    },
+  }));
+  const outputs = outputScripts.map(script => ({
+    value: 1_000_000n,
+    scriptPublicKey: new ScriptPublicKey(0, script),
+  }));
+  return Number(calculator.blankTransactionMass())
+    + Number(calculator.calcMassForInputs(inputs))
+    + Number(calculator.calcMassForOutputs(outputs));
+}
+
+router.post('/build-pskt', async (req, res) => {
+  try {
+    const { senderAddress, recipients } = req.body as {
+      senderAddress: string;
+      recipients: Array<{ address: string; amount: string | number }>;
+    };
+    if (!senderAddress?.startsWith('kaspa:') || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ error: 'A mainnet sender and at least one recipient are required.' });
+    }
+
+    const normalizedRecipients = recipients.map(recipient => {
+      if (!recipient.address?.startsWith('kaspa:')) throw new Error('All recipients must be mainnet kaspa: addresses.');
+      return {
+        address: recipient.address,
+        sompi: parseKasAmount(recipient.amount),
+        script: kaspaAddrToScript(recipient.address),
+      };
+    });
+    const paymentSompi = normalizedRecipients.reduce((sum, recipient) => sum + recipient.sompi, 0n);
+    const senderScript = kaspaAddrToScript(senderAddress);
+    const serviceScript = kaspaAddrToScript(SERVICE_FEE_ADDRESS);
+
+    const [utxoResponse, transactionResponse] = await Promise.all([
+      fetch(`${API_BASE.mainnet}/addresses/${senderAddress}/utxos`),
+      fetch(`${API_BASE.mainnet}/addresses/${senderAddress}/full-transactions?limit=100&offset=0&resolve_previous_outpoints=no`),
+    ]);
+    if (!utxoResponse.ok) throw new Error(`UTXO lookup failed (${utxoResponse.status}).`);
+    const rawUtxos = await utxoResponse.json() as any[];
+    const mempoolSpent = new Set<string>();
+    if (transactionResponse.ok) {
+      for (const transaction of await transactionResponse.json() as any[]) {
+        if (transaction.is_accepted === false) {
+          for (const input of transaction.inputs ?? []) {
+            mempoolSpent.add(`${input.previous_outpoint_hash}:${input.previous_outpoint_index}`);
+          }
+        }
+      }
+    }
+    const utxos = rawUtxos.map(utxo => ({
+      transactionId: String(utxo.outpoint.transactionId),
+      index: Number(utxo.outpoint.index),
+      amount: BigInt(utxo.utxoEntry.amount),
+      script: String(utxo.utxoEntry.scriptPublicKey.scriptPublicKey),
+      blockDaaScore: String(utxo.utxoEntry.blockDaaScore),
+      isCoinbase: Boolean(utxo.utxoEntry.isCoinbase),
+    })).filter(utxo => !mempoolSpent.has(`${utxo.transactionId}:${utxo.index}`))
+      .sort((a, b) => a.amount > b.amount ? -1 : a.amount < b.amount ? 1 : 0);
+    if (!utxos.length) return res.status(400).json({ error: 'No spendable UTXOs are available.' });
+
+    const selected: typeof utxos = [];
+    let selectedTotal = 0n;
+    let mass = 0;
+    let networkFee = 0n;
+    const baseScripts = [...normalizedRecipients.map(recipient => recipient.script), serviceScript];
+    for (const utxo of utxos) {
+      selected.push(utxo);
+      selectedTotal += utxo.amount;
+      mass = calculateP2pkMass(selected.length, [...baseScripts, senderScript]);
+      networkFee = BigInt(MassCalculator.minimumRequiredTransactionRelayFee(mass));
+      if (selectedTotal >= paymentSompi + SERVICE_FEE_SOMPI + networkFee) break;
+    }
+    if (mass > MassCalculator.maximumStandardTransactionMass()) {
+      return res.status(400).json({
+        error: `This dispersal is too large for one Kaspa transaction (${mass.toLocaleString()} / ${MassCalculator.maximumStandardTransactionMass().toLocaleString()} mass). Reduce the recipient count.`,
+      });
+    }
+    let change = selectedTotal - paymentSompi - SERVICE_FEE_SOMPI - networkFee;
+    if (change < 0n) {
+      return res.status(400).json({
+        error: `Insufficient funds. Need ${(paymentSompi + SERVICE_FEE_SOMPI + networkFee).toString()} sompi.`,
+      });
+    }
+    if (change > 0n && MassCalculator.isStandardOutputAmountDust(change)) {
+      networkFee += change;
+      change = 0n;
+      mass = calculateP2pkMass(selected.length, baseScripts);
+    }
+
+    const inputs = selected.map(utxo => ({
+      transactionId: utxo.transactionId,
+      index: utxo.index,
+      sequence: '0',
+      sigOpCount: 1,
+      signatureScript: '',
+      utxo: {
+        address: senderAddress,
+        amount: utxo.amount.toString(),
+        scriptPublicKey: safeScript(utxo.script),
+        blockDaaScore: utxo.blockDaaScore,
+        isCoinbase: utxo.isCoinbase,
+      },
+    }));
+    const outputs = [
+      ...normalizedRecipients.map(recipient => ({
+        value: recipient.sompi.toString(),
+        scriptPublicKey: safeScript(recipient.script),
+      })),
+      { value: SERVICE_FEE_SOMPI.toString(), scriptPublicKey: safeScript(serviceScript) },
+      ...(change > 0n ? [{ value: change.toString(), scriptPublicKey: safeScript(senderScript) }] : []),
+    ];
+    const txJsonString = JSON.stringify({
+      version: 0,
+      inputs,
+      outputs,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      lockTime: '0',
+      gas: '0',
+      mass: String(mass),
+      payload: '',
+    });
+
+    return res.json({
+      txJsonString,
+      inputIndicesToSign: inputs.map((_, index) => index),
+      recipientTotalSompi: paymentSompi.toString(),
+      serviceFeeSompi: SERVICE_FEE_SOMPI.toString(),
+      networkFeeSompi: networkFee.toString(),
+      grandTotalSompi: (paymentSompi + SERVICE_FEE_SOMPI + networkFee).toString(),
+      mass,
+      maximumMass: MassCalculator.maximumStandardTransactionMass(),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? 'Transaction build failed.' });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // POST /api/kaspa/build-tx

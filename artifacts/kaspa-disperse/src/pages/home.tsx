@@ -72,6 +72,17 @@ interface WalletAccount {
   provider: any;
 }
 
+interface TransactionReview {
+  txJsonString: string;
+  inputIndicesToSign: number[];
+  recipientTotalSompi: string;
+  serviceFeeSompi: string;
+  networkFeeSompi: string;
+  grandTotalSompi: string;
+  mass: number;
+  maximumMass: number;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Home() {
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
@@ -86,6 +97,8 @@ export default function Home() {
   const [statuses, setStatuses] = useState<TransferStatus[]>([]);
   const [serviceFeeStatus, setServiceFeeStatus] = useState<TransferStatus>({ status: 'pending', txId: '' });
   const [isProcessing, setIsProcessing] = useState(false);
+  const [review, setReview] = useState<TransactionReview | null>(null);
+  const [transactionError, setTransactionError] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -129,6 +142,8 @@ export default function Home() {
     setParseErrors(errors);
     setStatuses(parsed.map(() => ({ status: 'pending', txId: '' })));
     setServiceFeeStatus({ status: 'pending', txId: '' });
+    setReview(null);
+    setTransactionError('');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -166,92 +181,62 @@ export default function Home() {
   };
 
   // ── Execute ──────────────────────────────────────────────────────────────
-  const handleExecute = async () => {
+  const handlePrepareReview = async () => {
     if (!account) { setIsWalletModalOpen(true); return; }
     if (recipients.length === 0) return;
-
     const provider = account.provider;
-    if (!provider || typeof provider.sendKaspa !== 'function') {
-      alert('Connected wallet does not support sendKaspa. Please use KasWare or Kastle.');
+    if (account.walletId !== 'kasware' || typeof provider?.signPskt !== 'function' || typeof provider?.pushTx !== 'function') {
+      setTransactionError('Single-approval dispersals currently require KasWare Wallet.');
       return;
     }
-
-    const confirmed = window.confirm(
-      `This dispersal will send ${SERVICE_FEE_KAS} KAS to the service address after all recipient transfers complete. ` +
-      `The fee is charged once per dispersal, regardless of the number of recipients. Continue?`,
-    );
-    if (!confirmed) return;
-
     setIsProcessing(true);
-    const newStatuses: TransferStatus[] = recipients.map(() => ({ status: 'pending', txId: '' }));
-    setStatuses([...newStatuses]);
-
-    const sendWithRetry = async (
-      address: string,
-      amount: number,
-      onProgress: (status: TransferStatus) => void,
-    ): Promise<{ txId?: string; error?: string }> => {
-      const MAX_RETRIES = 5;
-
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        if (attempt > 0) {
-          const waitMs = attempt * 2000;
-          onProgress({
-            status: 'signing',
-            txId: '',
-            error: `Orphan retry ${attempt}/${MAX_RETRIES - 1} — waiting ${waitMs / 1000}s…`,
-          });
-          await new Promise((res) => setTimeout(res, waitMs));
-          onProgress({ status: 'signing', txId: '' });
-        }
-
-        try {
-          const raw = await provider.sendKaspa(address, Math.round(amount * 1e8));
-          return { txId: typeof raw === 'string' ? raw : (raw?.txId ?? raw?.id ?? '') };
-        } catch (err: any) {
-          const message = err?.message ?? 'Rejected';
-          if (!message.toLowerCase().includes('orphan') || attempt === MAX_RETRIES - 1) {
-            return { error: message };
-          }
-        }
-      }
-
-      return { error: 'Transaction failed after retrying.' };
-    };
-
-    for (let i = 0; i < recipients.length; i++) {
-      const { address, amount } = recipients[i];
-      newStatuses[i] = { status: 'signing', txId: '' };
-      setStatuses([...newStatuses]);
-
-      const result = await sendWithRetry(address, amount, (status) => {
-        newStatuses[i] = status;
-        setStatuses([...newStatuses]);
+    setTransactionError('');
+    try {
+      const response = await fetch('/api/kaspa/build-pskt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ senderAddress: account.address, recipients }),
       });
-
-      if (!result.error) {
-        newStatuses[i] = { status: 'sent', txId: result.txId ?? '' };
-        setStatuses([...newStatuses]);
-        // Let the wallet's UTXO state settle before the next transfer.
-        await new Promise((res) => setTimeout(res, 1500));
-      } else {
-        newStatuses[i] = { status: 'failed', txId: '', error: result.error };
-        setStatuses([...newStatuses]);
-        setIsProcessing(false);
-        return;
-      }
-    }
-
-    // Charge the fixed service fee once, after all recipient transfers succeed.
-    setServiceFeeStatus({ status: 'signing', txId: '' });
-    const feeResult = await sendWithRetry(SERVICE_FEE_ADDRESS, SERVICE_FEE_KAS, setServiceFeeStatus);
-    if (feeResult.error) {
-      setServiceFeeStatus({ status: 'failed', txId: '', error: feeResult.error });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Could not prepare transaction.');
+      setReview(body);
+    } catch (err: any) {
+      setTransactionError(err?.message ?? 'Could not prepare transaction.');
+    } finally {
       setIsProcessing(false);
-      return;
     }
-    setServiceFeeStatus({ status: 'sent', txId: feeResult.txId ?? '' });
-    setIsProcessing(false);
+  };
+
+  const handleSignAndBroadcast = async () => {
+    if (!account || !review) return;
+    setIsProcessing(true);
+    setTransactionError('');
+    setStatuses(recipients.map(() => ({ status: 'signing', txId: '' })));
+    setServiceFeeStatus({ status: 'signing', txId: '' });
+    try {
+      const signed = await account.provider.signPskt({
+        txJsonString: review.txJsonString,
+        options: {
+          signInputs: review.inputIndicesToSign.map(index => ({ index, sighashType: 1 })),
+        },
+      });
+      const signedJson = typeof signed === 'string' ? signed : signed?.txJsonString;
+      if (!signedJson) throw new Error('KasWare did not return a signed transaction.');
+      const pushed = await account.provider.pushTx(signedJson);
+      const txId = typeof pushed === 'string'
+        ? (() => { try { return JSON.parse(pushed)?.id ?? pushed; } catch { return pushed; } })()
+        : (pushed?.id ?? pushed?.txId ?? '');
+      setStatuses(recipients.map(() => ({ status: 'sent', txId })));
+      setServiceFeeStatus({ status: 'sent', txId });
+      setReview(null);
+    } catch (err: any) {
+      const message = err?.message ?? 'Transaction was rejected.';
+      setStatuses(recipients.map(() => ({ status: 'failed', txId: '', error: message })));
+      setServiceFeeStatus({ status: 'failed', txId: '', error: message });
+      setTransactionError(message);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const totalKas = recipients.reduce((s, r) => s + r.amount, 0);
@@ -260,6 +245,7 @@ export default function Home() {
   const pendingCount = statuses.filter(s => s.status === 'pending').length;
   const signingIdx = statuses.findIndex(s => s.status === 'signing');
   const isFeeSigning = serviceFeeStatus.status === 'signing';
+  const sompiToKas = (sompi: string) => (Number(sompi) / 1e8).toLocaleString(undefined, { maximumFractionDigits: 8 });
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -338,7 +324,7 @@ export default function Home() {
 
             <div className="text-xs text-zinc-500 flex justify-between">
               <span>Format: <code className="text-zinc-400">address amount</code> or <code className="text-zinc-400">address,amount</code></span>
-              <span>No recipient limit</span>
+              <span>One transaction, subject to Kaspa mass limits</span>
             </div>
 
             {parseErrors.length > 0 && (
@@ -383,17 +369,34 @@ export default function Home() {
                 <span>{SERVICE_FEE_KAS} KAS</span>
               </div>
               <div className="text-amber-400/80 mt-1">
-                One-time fee per dispersal, regardless of recipient or transaction count.
+                 Included in the same atomic transaction as every recipient.
               </div>
             </div>
+
+            {review && (
+              <div className="rounded-xl bg-emerald-950/25 border border-emerald-700/50 p-4 text-xs space-y-2">
+                <div className="font-semibold text-emerald-300">Review before signing</div>
+                <div className="flex justify-between"><span className="text-zinc-400">Recipients</span><span>{sompiToKas(review.recipientTotalSompi)} KAS</span></div>
+                <div className="flex justify-between"><span className="text-zinc-400">Service fee</span><span>{sompiToKas(review.serviceFeeSompi)} KAS</span></div>
+                <div className="flex justify-between"><span className="text-zinc-400">Network fee</span><span>{sompiToKas(review.networkFeeSompi)} KAS</span></div>
+                <div className="flex justify-between border-t border-emerald-800/60 pt-2 font-semibold"><span>Grand total</span><span>{sompiToKas(review.grandTotalSompi)} KAS</span></div>
+                <div className="text-[10px] text-zinc-500">Transaction mass: {review.mass.toLocaleString()} / {review.maximumMass.toLocaleString()}</div>
+              </div>
+            )}
+
+            {transactionError && (
+              <div className="rounded-xl bg-red-950/40 border border-red-800/60 p-3 text-xs text-red-300">
+                {transactionError}
+              </div>
+            )}
 
             {/* Progress during send */}
             {isProcessing && (signingIdx !== -1 || isFeeSigning) && (
               <div className="rounded-xl bg-amber-950/30 border border-amber-700/40 p-3 text-xs text-amber-300 flex items-center gap-2">
                 <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
                 {isFeeSigning
-                  ? `Approving ${SERVICE_FEE_KAS} KAS service fee in wallet…`
-                  : `Sending ${signingIdx + 1} of ${recipients.length} — approve in wallet…`}
+                  ? 'Approve the complete dispersal once in KasWare…'
+                  : `Signing all ${recipients.length} recipients in one transaction…`}
               </div>
             )}
 
@@ -470,7 +473,7 @@ export default function Home() {
                     )}
                   </div>
                   <div className="shrink-0 ml-2">
-                    {serviceFeeStatus.status === 'pending' && <span className="text-zinc-500">After transfers</span>}
+                    {serviceFeeStatus.status === 'pending' && <span className="text-zinc-500">Same transaction</span>}
                     {serviceFeeStatus.status === 'signing' && (
                       <span className="text-amber-400 flex items-center gap-1">
                         <Loader2 className="h-3 w-3 animate-spin" /> Approve
@@ -494,7 +497,7 @@ export default function Home() {
             {/* Send button */}
             <button
               disabled={isProcessing || recipients.length === 0}
-              onClick={handleExecute}
+              onClick={review ? handleSignAndBroadcast : handlePrepareReview}
               className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${
                 isProcessing || recipients.length === 0
                   ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
@@ -502,15 +505,15 @@ export default function Home() {
               }`}
             >
               {isProcessing ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Sending… ({pendingCount} remaining)</>
+                <><Loader2 className="h-4 w-4 animate-spin" /> {review ? 'Waiting for KasWare…' : 'Preparing review…'}</>
               ) : (
-                <><Send className="h-4 w-4" /> Send KAS + {SERVICE_FEE_KAS} KAS Fee</>
+                <><Send className="h-4 w-4" /> {review ? 'Approve & Send Once' : `Review KAS + ${SERVICE_FEE_KAS} KAS Fee`}</>
               )}
             </button>
 
             {recipients.length > 0 && !isProcessing && (
               <p className="text-[11px] text-zinc-500 text-center">
-                Each transfer requires one wallet approval
+                KasWare signs all recipients, the service fee, and change with one approval
               </p>
             )}
           </div>
