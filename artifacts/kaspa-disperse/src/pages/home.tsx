@@ -9,7 +9,7 @@ const KASPA_WALLETS = [
   {
     id: 'kasware',
     name: 'KasWare Wallet',
-    icon: 'https://www.kasware.xyz/logo.png',
+    icon: '/kaspa-mark.svg',
     type: 'extension',
     getProvider: () => typeof window !== 'undefined' ? (window as any).kasware : null,
     downloadUrl: 'https://chromewebstore.google.com/detail/kasware-wallet/hklhheigdmpoolooomdihmhlpjjdbklf',
@@ -17,7 +17,7 @@ const KASPA_WALLETS = [
   {
     id: 'kastle',
     name: 'Kastle Wallet',
-    icon: 'https://kastle.forbole.com/favicon.ico',
+    icon: '/kaspa-mark.svg',
     type: 'extension',
     getProvider: () => typeof window !== 'undefined' ? (window as any).kastle : null,
     downloadUrl: 'https://chromewebstore.google.com/detail/kastle/oambclflhjfppdmkghokjmpppmaebego',
@@ -25,7 +25,7 @@ const KASPA_WALLETS = [
   {
     id: 'nightly',
     name: 'Nightly Wallet',
-    icon: 'https://nightly.app/favicon.ico',
+    icon: '/kaspa-mark.svg',
     type: 'extension',
     getProvider: () => typeof window !== 'undefined' ? (window as any).nightly?.kaspa : null,
     downloadUrl: 'https://nightly.app/',
@@ -33,7 +33,7 @@ const KASPA_WALLETS = [
   {
     id: 'bitget',
     name: 'Bitget Wallet',
-    icon: 'https://web3.bitget.com/favicon.ico',
+    icon: '/kaspa-mark.svg',
     type: 'extension',
     getProvider: () => typeof window !== 'undefined'
       ? ((window as any).bitgetWallet?.kaspa || (window as any).bitget?.kaspa)
@@ -43,7 +43,7 @@ const KASPA_WALLETS = [
   {
     id: 'kaspium',
     name: 'Kaspium Mobile',
-    icon: 'https://kaspium.io/favicon.ico',
+    icon: '/kaspa-mark.svg',
     type: 'mobile',
     getProvider: null,
     downloadUrl: 'https://kaspium.io/',
