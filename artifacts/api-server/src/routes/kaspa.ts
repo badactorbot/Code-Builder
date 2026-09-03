@@ -10,6 +10,11 @@ import {
 const router = Router();
 const SERVICE_FEE_SOMPI = 10_000_000_000n;
 const SERVICE_FEE_ADDRESS = 'kaspa:qz6dltvkds80wf8raac504ze4nesgnk72n24jr7krum2m8dq34khvkevr88cc';
+// Kaspa mainnet's current minimum relay fee is 100 sompi per compute-mass unit.
+// Keep this explicit: MassCalculator.minimumRequiredTransactionRelayFee()
+// returns the mass under the installed WASM SDK's current consensus settings,
+// while the node enforces the 100 sompi/unit standardness floor.
+const MIN_RELAY_FEE_SOMPI_PER_MASS = 100n;
 
 // ---------------------------------------------------------------------------
 // Kaspa bech32 address → P2PK scriptPublicKey (pure JS, no kaspa-wasm needed)
@@ -173,7 +178,7 @@ router.post('/build-pskt', async (req, res) => {
       selected.push(utxo);
       selectedTotal += utxo.amount;
       mass = calculateP2pkMass(selected.length, [...baseScripts, senderScript]);
-      networkFee = BigInt(MassCalculator.minimumRequiredTransactionRelayFee(mass));
+      networkFee = BigInt(mass) * MIN_RELAY_FEE_SOMPI_PER_MASS;
       if (selectedTotal >= paymentSompi + SERVICE_FEE_SOMPI + networkFee) break;
     }
     if (mass > MassCalculator.maximumStandardTransactionMass()) {
