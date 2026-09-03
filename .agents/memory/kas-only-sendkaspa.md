@@ -3,8 +3,8 @@ name: KAS single-approval dispersal
 description: The validated KasWare Safe JSON contract for one atomic multi-output KAS dispersal.
 ---
 
-Build one multi-output Safe JSON transaction containing every recipient, the fixed service-fee output, and sender change; sign once with KasWare `signPskt` using Sighash All, then broadcast the returned string unchanged with `pushTx`.
+Build one multi-output Safe JSON transaction containing every recipient, the fixed service-fee output, and sender change; use `kaspa-wasm` to compute its top-level `id`, sign once with KasWare `signPskt` using Sighash All, then broadcast the returned string unchanged with `pushTx`.
 
-**Why:** KasWare's documented Safe JSON uses flat `transactionId`/`index` input fields, serialized script public keys, string amounts, and an explicit mass. This format passed a mocked end-to-end wallet flow, while the older per-recipient `sendKaspa` flow required repeated approvals.
+**Why:** KasWare's Safe JSON parser requires a valid top-level `id` in addition to flat `transactionId`/`index` input fields, serialized script public keys, string amounts, and explicit mass. Omitting it fails before signing with `missing field id`.
 
-**How to apply:** Fetch authoritative UTXOs, exclude mempool-spent outpoints, calculate mass and relay fee from the final input/output counts, and reject transactions above the 100,000 standard-mass ceiling. Do not convert the wallet's signed JSON through the REST broadcast schema.
+**How to apply:** Fetch authoritative UTXOs, exclude mempool-spent outpoints, calculate mass and relay fee from the final input/output counts, derive the ID from the exact unsigned transaction, and reject transactions above the 100,000 standard-mass ceiling. Do not convert the wallet's signed JSON through the REST broadcast schema.

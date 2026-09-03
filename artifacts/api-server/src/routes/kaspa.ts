@@ -3,6 +3,7 @@ import {
   MassCalculator,
   NetworkId,
   ScriptPublicKey,
+  Transaction,
   getConsensusParametersByNetwork,
 } from 'kaspa-wasm';
 
@@ -214,7 +215,33 @@ router.post('/build-pskt', async (req, res) => {
       { value: SERVICE_FEE_SOMPI.toString(), scriptPublicKey: safeScript(serviceScript) },
       ...(change > 0n ? [{ value: change.toString(), scriptPublicKey: safeScript(senderScript) }] : []),
     ];
+    const transaction = new Transaction({
+      version: 0,
+      inputs: selected.map(utxo => ({
+        previousOutpoint: { transactionId: utxo.transactionId, index: utxo.index },
+        signatureScript: '',
+        sequence: 0n,
+        sigOpCount: 1,
+        utxoEntry: {
+          amount: utxo.amount,
+          scriptPublicKey: new ScriptPublicKey(0, utxo.script),
+          blockDaaScore: BigInt(utxo.blockDaaScore),
+          isCoinbase: utxo.isCoinbase,
+        },
+      })),
+      outputs: outputs.map(output => ({
+        value: BigInt(output.value),
+        scriptPublicKey: new ScriptPublicKey(0, output.scriptPublicKey.slice(4)),
+      })),
+      lockTime: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      gas: 0n,
+      payload: '',
+    });
+    const transactionId = transaction.finalize().toString();
+    transaction.free();
     const txJsonString = JSON.stringify({
+      id: transactionId,
       version: 0,
       inputs,
       outputs,
