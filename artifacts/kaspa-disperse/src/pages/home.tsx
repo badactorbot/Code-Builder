@@ -14,12 +14,11 @@ import {
   Wallet,
   Zap,
 } from 'lucide-react';
-import { Link } from 'wouter';
 import { LandingLayout } from '@/components/dispenser/landing-layout';
 import { DispenserLogo } from '@/components/dispenser/brand-logo';
 import { TokenDistributionChart } from '@/components/dispenser/token-distribution-chart';
 import KineticGrid from '@/components/ui/kinetic-grid';
-import { SERVICE_FEE_KAS } from '@/lib/dispenser/constants';
+import { SERVICE_FEE_KAS, DISTRO_APP_URL } from '@/lib/dispenser/constants';
 
 const USE_CASES = [
   'Community Rewards',
@@ -50,12 +49,12 @@ const AUDIENCES = [
 
 function CtaButton({ className = '', large = false }: { className?: string; large?: boolean }) {
   return (
-    <Link
-      href="/distro"
+    <a
+      href={DISTRO_APP_URL}
       className={`kd-btn inline-flex items-center justify-center gap-2 text-black font-bold rounded-xl uppercase tracking-wide transition ${large ? 'px-10 py-4 text-sm' : 'px-6 py-3 text-xs sm:text-sm'} ${className}`}
     >
       Launch KASDISTRO <ArrowRight className="h-4 w-4" />
-    </Link>
+    </a>
   );
 }
 
@@ -241,12 +240,12 @@ export default function Home() {
           </h2>
           <p className="text-zinc-400 mb-2">You decide who receives KAS and how much.</p>
           <p className="text-zinc-300 font-medium mb-10">Bulk distribution made simple.</p>
-          <Link
-            href="/distro"
+          <a
+            href={DISTRO_APP_URL}
             className="kd-btn inline-flex items-center gap-2 text-black font-bold px-10 py-4 rounded-xl uppercase tracking-wide text-sm"
           >
             <Upload className="h-4 w-4" /> Launch KASDISTRO
-          </Link>
+          </a>
         </div>
       </section>
     </LandingLayout>

@@ -15,11 +15,12 @@ import {
 import { Link, useLocation } from 'wouter';
 import { type ReactNode } from 'react';
 import { type WalletAccount } from '@/lib/dispenser/wallets';
+import { DISTRO_APP_URL } from '@/lib/dispenser/constants';
 import { cn } from '@/lib/utils';
 import { DispenserBrand } from './brand-logo';
 
 const NAV = [
-  { id: 'dispenser', label: 'Distro', href: '/distro', icon: LayoutDashboard },
+  { id: 'dispenser', label: 'Distro', href: DISTRO_APP_URL, icon: LayoutDashboard },
   { id: 'how', label: 'How It Works', href: '/#how-it-works', icon: Zap },
   { id: 'fees', label: 'Fees', href: '/#fees', icon: PieChart },
 ] as const;

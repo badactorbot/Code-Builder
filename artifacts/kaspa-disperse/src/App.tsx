@@ -4,8 +4,8 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import Home from '@/pages/home';
-import Distro from '@/pages/distro';
 import NotFound from '@/pages/not-found';
+import { DISTRO_APP_URL } from '@/lib/dispenser/constants';
 import {
   Route,
   Switch,
@@ -15,11 +15,10 @@ import {
 
 const queryClient = new QueryClient();
 
-function RedirectToDistro() {
-  const [, setLocation] = useLocation();
+function RedirectToDistroApp() {
   useEffect(() => {
-    setLocation('/distro', { replace: true });
-  }, [setLocation]);
+    window.location.replace(DISTRO_APP_URL);
+  }, []);
   return null;
 }
 
@@ -28,8 +27,8 @@ function Router() {
     <RoutedErrorBoundary>
       <Switch>
         <Route path="/" component={Home} />
-        <Route path="/distro" component={Distro} />
-        <Route path="/dispenser" component={RedirectToDistro} />
+        <Route path="/distro" component={RedirectToDistroApp} />
+        <Route path="/dispenser" component={RedirectToDistroApp} />
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>

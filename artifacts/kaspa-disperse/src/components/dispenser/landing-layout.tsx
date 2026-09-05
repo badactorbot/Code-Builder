@@ -1,6 +1,7 @@
 import { ArrowRight } from 'lucide-react';
 import { Link } from 'wouter';
 import { type ReactNode } from 'react';
+import { DISTRO_APP_URL } from '@/lib/dispenser/constants';
 import { DispenserLogo } from './brand-logo';
 
 const LINKS = [
@@ -34,12 +35,12 @@ export function LandingLayout({ children }: { children: ReactNode }) {
             <DispenserLogo size="md" />
           </Link>
 
-          <Link
-            href="/distro"
+          <a
+            href={DISTRO_APP_URL}
             className="kd-btn ml-auto inline-flex items-center gap-2 text-black font-semibold text-sm px-5 py-2.5 rounded-xl"
           >
             Launch KASDISTRO <ArrowRight className="h-4 w-4" />
-          </Link>
+          </a>
         </div>
       </header>
 
@@ -54,7 +55,7 @@ export function LandingLayout({ children }: { children: ReactNode }) {
             <a href="/#features" className="hover:text-zinc-300">Features</a>
             <a href="/#how-it-works" className="hover:text-zinc-300">How It Works</a>
             <a href="/#token-distribution" className="hover:text-zinc-300">Token Distribution</a>
-            <Link href="/distro" className="hover:text-cyan-400">Launch KASDISTRO</Link>
+            <a href={DISTRO_APP_URL} className="hover:text-cyan-400">Launch KASDISTRO</a>
           </div>
         </div>
       </footer>
