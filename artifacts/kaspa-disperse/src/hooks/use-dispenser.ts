@@ -29,8 +29,10 @@ function sompiToKas(sompi: string) {
 }
 
 async function buildDispersalReview(senderAddress: string, recipients: Recipient[]) {
+  const apiBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '')
+    ?? 'https://bushwookiekasperse.replit.app';
   const request = () =>
-    fetch('/api/kaspa/build-pskt', {
+    fetch(`${apiBase}/api/kaspa/build-pskt`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -54,7 +56,7 @@ async function buildDispersalReview(senderAddress: string, recipients: Recipient
 
   if (responseText.trim() === '') {
     throw new Error(
-      `Transaction service returned an empty response (HTTP ${response.status}). Please try again.`,
+      `Transaction service returned an empty response (HTTP ${response.status}). Check that the hosted API is reachable and try again.`,
     );
   }
 
