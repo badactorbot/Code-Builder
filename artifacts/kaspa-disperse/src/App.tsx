@@ -1,10 +1,10 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import Home from '@/pages/home';
-import Dispenser from '@/pages/dispenser';
+import Distro from '@/pages/distro';
 import NotFound from '@/pages/not-found';
 import {
   Route,
@@ -15,12 +15,21 @@ import {
 
 const queryClient = new QueryClient();
 
+function RedirectToDistro() {
+  const [, setLocation] = useLocation();
+  useEffect(() => {
+    setLocation('/distro', { replace: true });
+  }, [setLocation]);
+  return null;
+}
+
 function Router() {
   return (
     <RoutedErrorBoundary>
       <Switch>
         <Route path="/" component={Home} />
-        <Route path="/dispenser" component={Dispenser} />
+        <Route path="/distro" component={Distro} />
+        <Route path="/dispenser" component={RedirectToDistro} />
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>

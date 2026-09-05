@@ -12,6 +12,7 @@ import {
   Users,
   Zap,
 } from 'lucide-react';
+import { DispenserLogo } from '@/components/dispenser/brand-logo';
 import { ToolLayout, WalletCard } from '@/components/dispenser/tool-layout';
 import { WalletModal } from '@/components/dispenser/wallet-modal';
 import { useDispenser } from '@/hooks/use-dispenser';
@@ -42,7 +43,7 @@ function TransferStatus({ status }: { status: string }) {
   }
 }
 
-export default function Dispenser() {
+export default function Distro() {
   const d = useDispenser();
   const [search, setSearch] = useState('');
 
@@ -76,7 +77,8 @@ export default function Dispenser() {
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white">Dispenser</h1>
+          <DispenserLogo size="xl" className="mb-4" />
+          <h1 className="text-2xl font-bold text-white tracking-wide">KASDISTRO APP</h1>
           <p className="text-sm text-zinc-500 mt-1">Upload recipients, review fees, and dispense KAS rewards.</p>
         </div>
 
