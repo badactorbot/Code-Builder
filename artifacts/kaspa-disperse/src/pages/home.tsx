@@ -181,6 +181,51 @@ export default function Home() {
   };
 
   // ── Execute ──────────────────────────────────────────────────────────────
+  const buildDispersalReview = async () => {
+    const request = () => fetch('/api/kaspa/build-pskt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Cache-Control': 'no-cache',
+      },
+      cache: 'no-store',
+      body: JSON.stringify({ senderAddress: account?.address, recipients }),
+    });
+
+    let response = await request();
+    let responseText = await response.text();
+
+    // A deployed proxy can occasionally close a successful response before its
+    // body reaches the browser. Retrying is safe because this endpoint only
+    // prepares an unsigned transaction and does not spend or broadcast funds.
+    if (response.ok && responseText.trim() === '') {
+      response = await request();
+      responseText = await response.text();
+    }
+
+    if (responseText.trim() === '') {
+      throw new Error(
+        `Transaction service returned an empty response (HTTP ${response.status}). Please try again.`,
+      );
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(responseText);
+    } catch {
+      throw new Error(
+        `Transaction service returned an invalid response (HTTP ${response.status}). Please try again.`,
+      );
+    }
+
+    if (!response.ok) {
+      throw new Error(body?.error || `Could not prepare transaction (HTTP ${response.status}).`);
+    }
+
+    return body;
+  };
+
   const handlePrepareReview = async () => {
     if (!account) { setIsWalletModalOpen(true); return; }
     if (recipients.length === 0) return;
@@ -192,14 +237,7 @@ export default function Home() {
     setIsProcessing(true);
     setTransactionError('');
     try {
-      const response = await fetch('/api/kaspa/build-pskt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ senderAddress: account.address, recipients }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || 'Could not prepare transaction.');
-      setReview(body);
+      setReview(await buildDispersalReview());
     } catch (err: any) {
       setTransactionError(err?.message ?? 'Could not prepare transaction.');
     } finally {
