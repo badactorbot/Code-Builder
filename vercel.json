@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "pnpm install",
+  "buildCommand": "PORT=22434 BASE_PATH=/ pnpm --filter @workspace/kaspa-disperse run build",
+  "outputDirectory": "artifacts/kaspa-disperse/dist/public",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
