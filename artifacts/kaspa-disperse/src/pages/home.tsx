@@ -1,254 +1,651 @@
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  ArrowRight,
-  Building2,
-  Coins,
-  Gift,
-  Lock,
-  PieChart,
-  Rocket,
-  Send,
-  Shield,
-  Sparkles,
-  Upload,
-  Users,
-  Wallet,
-  Zap,
+  Wallet, Upload, Send, CheckCircle2, AlertCircle, X,
+  Download, ExternalLink, Loader2, FileText, Layers,
 } from 'lucide-react';
-import { Link } from 'wouter';
-import { LandingLayout } from '@/components/dispenser/landing-layout';
-import { DispenserLogo } from '@/components/dispenser/brand-logo';
-import { TokenDistributionChart } from '@/components/dispenser/token-distribution-chart';
-import KineticGrid from '@/components/ui/kinetic-grid';
-import { SERVICE_FEE_KAS } from '@/lib/dispenser/constants';
 
-const USE_CASES = [
-  'Community Rewards',
-  'Holder Rewards',
-  'Giveaways',
-  'Contest Winners',
-  'Event Rewards',
-  'Contributor Payments',
-  'Promotional Campaigns',
-  'Loyalty Rewards',
-  'Custom Airdrops',
+// ── Wallets ───────────────────────────────────────────────────────────────────
+const KASPA_WALLETS = [
+  {
+    id: 'kasware',
+    name: 'KasWare Wallet',
+    icon: '/kaspa-mark.svg',
+    type: 'extension',
+    getProvider: () => typeof window !== 'undefined' ? (window as any).kasware : null,
+    downloadUrl: 'https://chromewebstore.google.com/detail/kasware-wallet/hklhheigdmpoolooomdihmhlpjjdbklf',
+  },
+  {
+    id: 'kastle',
+    name: 'Kastle Wallet',
+    icon: '/kaspa-mark.svg',
+    type: 'extension',
+    getProvider: () => typeof window !== 'undefined' ? (window as any).kastle : null,
+    downloadUrl: 'https://chromewebstore.google.com/detail/kastle/oambclflhjfppdmkghokjmpppmaebego',
+  },
+  {
+    id: 'nightly',
+    name: 'Nightly Wallet',
+    icon: '/kaspa-mark.svg',
+    type: 'extension',
+    getProvider: () => typeof window !== 'undefined' ? (window as any).nightly?.kaspa : null,
+    downloadUrl: 'https://nightly.app/',
+  },
+  {
+    id: 'bitget',
+    name: 'Bitget Wallet',
+    icon: '/kaspa-mark.svg',
+    type: 'extension',
+    getProvider: () => typeof window !== 'undefined'
+      ? ((window as any).bitgetWallet?.kaspa || (window as any).bitget?.kaspa)
+      : null,
+    downloadUrl: 'https://web3.bitget.com/',
+  },
+  {
+    id: 'kaspium',
+    name: 'Kaspium Mobile',
+    icon: '/kaspa-mark.svg',
+    type: 'mobile',
+    getProvider: null,
+    downloadUrl: 'https://kaspium.io/',
+  },
 ];
 
-const STEPS = [
-  { num: '01', title: 'Connect Your Wallet', body: 'Connect your supported Kaspa wallet to KASDISTRO.' },
-  { num: '02', title: 'Add Your Recipients', body: 'Enter or upload the Kaspa wallet addresses receiving the distribution.' },
-  { num: '03', title: 'Set Your Rewards', body: 'Send the same amount to everyone or customize individual reward amounts.' },
-  { num: '04', title: 'Review Your Drop', body: 'See recipient count, total KAS, network fees, and service fee before anything is sent.' },
-  { num: '05', title: 'Dispense', body: 'Confirm the transaction and distribute rewards — no more sending wallet by wallet.' },
-];
+const SERVICE_FEE_KAS = 100;
+const SERVICE_FEE_ADDRESS = 'kaspa:qz6dltvkds80wf8raac504ze4nesgnk72n24jr7krum2m8dq34khvkevr88cc';
 
-const AUDIENCES = [
-  { icon: Rocket, title: 'Projects', body: 'Reward holders, run campaigns, distribute prizes, and activate your community.' },
-  { icon: Sparkles, title: 'Creators', body: 'Reward followers, supporters, contest winners, and collaborators.' },
-  { icon: Users, title: 'Communities', body: 'Run giveaways without manually processing dozens of individual payments.' },
-  { icon: Building2, title: 'Businesses', body: 'Use KAS for promotions, incentives, affiliate rewards, and loyalty campaigns.' },
-];
-
-function CtaButton({ className = '', large = false }: { className?: string; large?: boolean }) {
-  return (
-    <Link
-      href="/dispenser"
-      className={`kd-btn inline-flex items-center justify-center gap-2 text-black font-bold rounded-xl uppercase tracking-wide transition ${large ? 'px-10 py-4 text-sm' : 'px-6 py-3 text-xs sm:text-sm'} ${className}`}
-    >
-      Launch KASDISTRO <ArrowRight className="h-4 w-4" />
-    </Link>
-  );
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface Recipient {
+  address: string;
+  amount: number; // KAS
 }
 
+interface TransferStatus {
+  status: 'pending' | 'signing' | 'sent' | 'failed';
+  txId: string;
+  error?: string;
+}
+
+interface WalletAccount {
+  address: string;
+  walletId: string;
+  walletName: string;
+  provider: any;
+}
+
+interface TransactionReview {
+  txJsonString: string;
+  inputIndicesToSign: number[];
+  recipientTotalSompi: string;
+  serviceFeeSompi: string;
+  networkFeeSompi: string;
+  grandTotalSompi: string;
+  mass: number;
+  maximumMass: number;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 export default function Home() {
+  const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
+  const [account, setAccount] = useState<WalletAccount | null>(null);
+  const [walletLoading, setWalletLoading] = useState<string | null>(null);
+  const [walletError, setWalletError] = useState('');
+  const [installedMap, setInstalledMap] = useState<Record<string, boolean>>({});
+
+  const [rawInput, setRawInput] = useState('');
+  const [recipients, setRecipients] = useState<Recipient[]>([]);
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [statuses, setStatuses] = useState<TransferStatus[]>([]);
+  const [serviceFeeStatus, setServiceFeeStatus] = useState<TransferStatus>({ status: 'pending', txId: '' });
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [review, setReview] = useState<TransactionReview | null>(null);
+  const [transactionError, setTransactionError] = useState('');
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Detect installed wallets
+  useEffect(() => {
+    const check = () => {
+      const map: Record<string, boolean> = {};
+      KASPA_WALLETS.forEach((w) => {
+        if (w.type === 'extension' && w.getProvider) map[w.id] = !!w.getProvider();
+      });
+      setInstalledMap(map);
+    };
+    check();
+    const t = setTimeout(check, 600);
+    return () => clearTimeout(t);
+  }, [isWalletModalOpen]);
+
+  // ── Parse input ──────────────────────────────────────────────────────────
+  const handleParseInput = (text: string) => {
+    setRawInput(text);
+    const parsed: Recipient[] = [];
+    const errors: string[] = [];
+
+    text.split('\n').forEach((line, i) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+      const parts = trimmed.split(/[\s,=]+/);
+      if (parts.length >= 2) {
+        const address = parts[0].trim();
+        const amount = parseFloat(parts[1].trim());
+        const validAddr = address.startsWith('kaspa:') || address.startsWith('kaspatest:');
+        if (!validAddr) errors.push(`Line ${i + 1}: Invalid address`);
+        else if (isNaN(amount) || amount <= 0) errors.push(`Line ${i + 1}: Invalid amount`);
+        else parsed.push({ address, amount });
+      } else if (trimmed.length > 0) {
+        errors.push(`Line ${i + 1}: Could not parse`);
+      }
+    });
+
+    setRecipients(parsed);
+    setParseErrors(errors);
+    setStatuses(parsed.map(() => ({ status: 'pending', txId: '' })));
+    setServiceFeeStatus({ status: 'pending', txId: '' });
+    setReview(null);
+    setTransactionError('');
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => handleParseInput(ev.target?.result as string);
+    reader.readAsText(file);
+  };
+
+  // ── Connect wallet ───────────────────────────────────────────────────────
+  const handleConnectWallet = async (wallet: typeof KASPA_WALLETS[0]) => {
+    setWalletError('');
+    setWalletLoading(wallet.id);
+    try {
+      if (wallet.type === 'extension') {
+        const provider = wallet.getProvider ? wallet.getProvider() : null;
+        if (!provider) throw new Error(`${wallet.name} is not installed.`);
+        let accounts: any[] = [];
+        if (typeof provider.requestAccounts === 'function') accounts = await provider.requestAccounts();
+        else if (typeof provider.connect === 'function') accounts = await provider.connect();
+        else if (typeof provider.getAccounts === 'function') accounts = await provider.getAccounts();
+        if (!accounts?.length) throw new Error('No account returned from wallet.');
+        const addr = typeof accounts[0] === 'string' ? accounts[0] : accounts[0].address;
+        setAccount({ address: addr, walletId: wallet.id, walletName: wallet.name, provider });
+        setIsWalletModalOpen(false);
+      } else {
+        window.open(wallet.downloadUrl, '_blank');
+      }
+    } catch (err: any) {
+      setWalletError(err.message || 'Failed to connect.');
+    } finally {
+      setWalletLoading(null);
+    }
+  };
+
+  // ── Execute ──────────────────────────────────────────────────────────────
+  const buildDispersalReview = async () => {
+    const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '');
+    const isReplitDeployment = window.location.hostname.endsWith('.replit.app');
+    const apiBase = configuredApiBase
+      ?? (isReplitDeployment ? '' : 'https://bushwookiekasperse.replit.app');
+    const endpoint = `${apiBase}/api/kaspa/build-pskt`;
+
+    const request = () => fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Cache-Control': 'no-cache',
+      },
+      cache: 'no-store',
+      body: JSON.stringify({ senderAddress: account?.address, recipients }),
+    });
+
+    let response = await request();
+    let responseText = await response.text();
+
+    // A deployed proxy can occasionally close a successful response before its
+    // body reaches the browser. Retrying is safe because this endpoint only
+    // prepares an unsigned transaction and does not spend or broadcast funds.
+    if (response.ok && responseText.trim() === '') {
+      response = await request();
+      responseText = await response.text();
+    }
+
+    if (responseText.trim() === '') {
+      throw new Error(
+        `Transaction service returned an empty response (HTTP ${response.status}). Check that the hosted API is public and try again.`,
+      );
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(responseText);
+    } catch {
+      throw new Error(
+        `Transaction service returned an invalid response (HTTP ${response.status}). Please try again.`,
+      );
+    }
+
+    if (!response.ok) {
+      throw new Error(body?.error || `Could not prepare transaction (HTTP ${response.status}).`);
+    }
+
+    return body;
+  };
+
+  const handlePrepareReview = async () => {
+    if (!account) { setIsWalletModalOpen(true); return; }
+    if (recipients.length === 0) return;
+    const provider = account.provider;
+    if (account.walletId !== 'kasware' || typeof provider?.signPskt !== 'function' || typeof provider?.pushTx !== 'function') {
+      setTransactionError('Single-approval dispersals currently require KasWare Wallet.');
+      return;
+    }
+    setIsProcessing(true);
+    setTransactionError('');
+    try {
+      setReview(await buildDispersalReview());
+    } catch (err: any) {
+      setTransactionError(err?.message ?? 'Could not prepare transaction.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSignAndBroadcast = async () => {
+    if (!account || !review) return;
+    setIsProcessing(true);
+    setTransactionError('');
+    setStatuses(recipients.map(() => ({ status: 'signing', txId: '' })));
+    setServiceFeeStatus({ status: 'signing', txId: '' });
+    try {
+      const signed = await account.provider.signPskt({
+        txJsonString: review.txJsonString,
+        options: {
+          signInputs: review.inputIndicesToSign.map(index => ({ index, sighashType: 1 })),
+        },
+      });
+      const signedJson = typeof signed === 'string' ? signed : signed?.txJsonString;
+      if (!signedJson) throw new Error('KasWare did not return a signed transaction.');
+      const pushed = await account.provider.pushTx(signedJson);
+      const txId = typeof pushed === 'string'
+        ? (() => { try { return JSON.parse(pushed)?.id ?? pushed; } catch { return pushed; } })()
+        : (pushed?.id ?? pushed?.txId ?? '');
+      setStatuses(recipients.map(() => ({ status: 'sent', txId })));
+      setServiceFeeStatus({ status: 'sent', txId });
+      setReview(null);
+    } catch (err: any) {
+      const message = err?.message ?? 'Transaction was rejected.';
+      setStatuses(recipients.map(() => ({ status: 'failed', txId: '', error: message })));
+      setServiceFeeStatus({ status: 'failed', txId: '', error: message });
+      setTransactionError(message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const totalKas = recipients.reduce((s, r) => s + r.amount, 0);
+  const sentCount = statuses.filter(s => s.status === 'sent').length;
+  const failedCount = statuses.filter(s => s.status === 'failed').length;
+  const pendingCount = statuses.filter(s => s.status === 'pending').length;
+  const signingIdx = statuses.findIndex(s => s.status === 'signing');
+  const isFeeSigning = serviceFeeStatus.status === 'signing';
+  const sompiToKas = (sompi: string) => (Number(sompi) / 1e8).toLocaleString(undefined, { maximumFractionDigits: 8 });
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <LandingLayout>
-      <section className="relative overflow-hidden border-b border-cyan-900/20">
-        <KineticGrid>
-          <div className="flex min-h-[min(100vh,820px)] flex-col items-center justify-center px-4 sm:px-6 py-24 text-center">
-            <DispenserLogo size="hero" className="mb-8" />
-            <p className="mb-6 rounded-full border border-cyan-500/25 bg-cyan-500/5 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300/90">
-              KASDISTRO
-            </p>
-            <h1 className="max-w-4xl text-4xl sm:text-5xl lg:text-6xl font-bold text-white tracking-tight leading-[1.1]">
-              Reward Your Community in{' '}
-              <span className="kd-gradient-text">KAS</span>
-            </h1>
-            <p className="mt-6 text-lg sm:text-xl text-white/55 max-w-2xl">
-              One tool. Multiple wallets. One transaction flow.
-            </p>
-            <p className="mt-4 text-base text-white/40 max-w-3xl leading-relaxed">
-              KASDISTRO gives projects, creators, communities, and teams an easy way to
-              distribute KAS rewards to multiple wallet addresses at once.
-            </p>
-            <p className="mt-6 text-cyan-300/90 font-medium">
-              Load your list. Set your rewards. Send the KAS.
-            </p>
-            <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-              <CtaButton large />
-              <a href="#how-it-works" className="text-sm text-white/45 hover:text-white transition">
-                See how it works →
-              </a>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans flex flex-col">
+
+      {/* NAV */}
+      <nav className="sticky top-0 z-40 border-b border-zinc-800/60 bg-zinc-950/90 backdrop-blur-md">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-8 w-8 rounded-xl bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+              <Layers className="h-4 w-4 text-black" />
+            </div>
+            <div>
+              <span className="font-bold text-sm text-white">Kaspa Disperse</span>
+              <p className="text-[10px] text-zinc-500 leading-none">Bulk KAS Sender</p>
             </div>
           </div>
-        </KineticGrid>
-      </section>
 
-      <section id="features" className="border-t border-cyan-900/20 py-20 sm:py-24">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="max-w-2xl mb-12">
-            <h2 className="text-2xl sm:text-3xl font-bold text-white">Built for Community Rewards</h2>
-            <p className="mt-4 text-zinc-400 leading-relaxed">
-              Stop manually sending KAS one wallet at a time. Prepare a list of recipient wallets,
-              assign amounts, review the distribution, and send your rewards from one place.
-            </p>
-          </div>
-          <div className="grid sm:grid-cols-3 gap-6 mb-14">
-            {[
-              { icon: Zap, title: 'One to Many', body: 'Bulk-send KAS to hundreds of wallets in one workflow.' },
-              { icon: Shield, title: 'Fast & Secure', body: 'Built on Kaspa\'s BlockDAG. You approve every transfer.' },
-              { icon: Coins, title: 'Transparent Fees', body: 'See exactly what you send and pay before you confirm.' },
-            ].map(({ icon: Icon, title, body }) => (
-              <div key={title} className="kd-glass-strong rounded-2xl p-6">
-                <Icon className="h-8 w-8 text-cyan-400 mb-4" />
-                <h3 className="font-semibold text-white mb-2">{title}</h3>
-                <p className="text-sm text-zinc-500 leading-relaxed">{body}</p>
+          {account ? (
+            <div className="flex items-center gap-2">
+              <div className="hidden sm:block text-right">
+                <div className="text-xs font-medium text-zinc-200">{account.walletName}</div>
+                <div className="text-[11px] text-zinc-500 font-mono">
+                  {account.address.slice(0, 12)}…{account.address.slice(-6)}
+                </div>
               </div>
-            ))}
-          </div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-4">Use it for</p>
-          <div className="flex flex-wrap gap-2">
-            {USE_CASES.map((item) => (
-              <span key={item} className="kd-glass px-4 py-2 rounded-full text-sm text-zinc-300">
-                {item}
-              </span>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="how-it-works" className="border-t border-cyan-900/20 py-20 sm:py-24 bg-[#070b10]/50">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="text-center mb-14">
-            <h2 className="text-2xl sm:text-3xl font-bold text-white">How It Works</h2>
-            <p className="mt-3 text-zinc-500">From one wallet to many in a few simple steps.</p>
-          </div>
-          <div className="flex flex-wrap justify-center gap-6">
-            {STEPS.map((step) => (
-              <div
-                key={step.num}
-                className="kd-glass rounded-2xl p-6 w-full md:w-[calc((100%-1.5rem)/2)] lg:w-[calc((100%-3rem)/3)]"
+              <button
+                onClick={() => setAccount(null)}
+                className="flex items-center gap-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition"
               >
-                <span className="text-cyan-500 font-mono text-sm font-bold">{step.num}</span>
-                <h3 className="text-lg font-semibold text-white mt-2 mb-2">{step.title}</h3>
-                <p className="text-sm text-zinc-500 leading-relaxed">{step.body}</p>
-              </div>
-            ))}
-          </div>
+                <X className="h-3.5 w-3.5" /> Disconnect
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsWalletModalOpen(true)}
+              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-sm px-4 py-2 rounded-xl transition shadow-lg shadow-emerald-500/20"
+            >
+              <Wallet className="h-4 w-4" /> Connect Wallet
+            </button>
+          )}
         </div>
-      </section>
+      </nav>
 
-      <section id="fees" className="border-t border-cyan-900/20 py-20 sm:py-24">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="text-center mb-14">
-            <h2 className="text-2xl sm:text-3xl font-bold text-white">Simple, Transparent Fees</h2>
-            <p className="mt-3 text-zinc-500 max-w-xl mx-auto">
-              No guessing what your drop will cost. See exactly what you&apos;re sending and paying before you confirm.
-            </p>
-          </div>
-          <div className="max-w-lg mx-auto">
-            <div className="kd-glass-strong rounded-2xl p-8 space-y-4">
-              <h3 className="font-semibold text-white">Before you confirm</h3>
-              {[
-                { label: 'KAS Distributed', desc: 'Total sent to your recipients' },
-                { label: 'Kaspa Network Fee', desc: 'Blockchain cost per transfer' },
-                { label: 'Service Fee', desc: `${SERVICE_FEE_KAS} KAS flat per drop` },
-              ].map((row) => (
-                <div key={row.label} className="flex justify-between gap-4 text-sm border-b border-cyan-900/10 pb-3">
-                  <span className="text-zinc-300">{row.label}</span>
-                  <span className="text-zinc-500 text-right">{row.desc}</span>
-                </div>
-              ))}
-              <div className="kd-glass rounded-xl p-4 flex justify-between border-cyan-500/20">
-                <span className="font-semibold text-cyan-300">Total</span>
-                <span className="text-white text-sm">Distribution + all fees</span>
+      {/* MAIN */}
+      <main className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-8 grid lg:grid-cols-12 gap-6 flex-1">
+
+        {/* LEFT — Input */}
+        <section className="lg:col-span-7 space-y-6">
+
+          {/* Recipient input */}
+          <div className="rounded-2xl bg-zinc-900 border border-zinc-800 p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
+                <FileText className="h-4 w-4 text-emerald-400" />
+                Recipient Addresses &amp; Amounts
+              </label>
+              <div>
+                <input type="file" accept=".csv,.txt" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition"
+                >
+                  <Upload className="h-3.5 w-3.5" /> Upload CSV
+                </button>
               </div>
-              <p className="text-xs text-zinc-500">No hidden charges.</p>
+            </div>
+
+            <textarea
+              rows={12}
+              value={rawInput}
+              onChange={(e) => handleParseInput(e.target.value)}
+              placeholder={`kaspa:qq2... 150.5\nkaspa:qr8... 200\nkaspa:qz7... 50`}
+              className="w-full rounded-xl bg-zinc-950 border border-zinc-800 p-4 font-mono text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition resize-none"
+            />
+
+            <div className="text-xs text-zinc-500 flex justify-between">
+              <span>Format: <code className="text-zinc-400">address amount</code> or <code className="text-zinc-400">address,amount</code></span>
+              <span>One transaction, subject to Kaspa mass limits</span>
+            </div>
+
+            {parseErrors.length > 0 && (
+              <div className="rounded-xl bg-red-950/40 border border-red-800/60 p-4 space-y-1 text-xs text-red-300">
+                <div className="font-semibold flex items-center gap-1">
+                  <AlertCircle className="h-4 w-4" /> Parse errors ({parseErrors.length})
+                </div>
+                <ul className="list-disc list-inside space-y-0.5 text-[11px] opacity-90 max-h-24 overflow-y-auto">
+                  {parseErrors.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* RIGHT — Summary + Actions */}
+        <section className="lg:col-span-5 space-y-6">
+          <div className="rounded-2xl bg-zinc-900 border border-zinc-800 p-6 shadow-xl space-y-6 sticky top-24">
+
+            <h2 className="text-base font-semibold border-b border-zinc-800 pb-3 flex items-center justify-between">
+              <span>Disperse Summary</span>
+              <Layers className="h-4 w-4 text-emerald-400" />
+            </h2>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl bg-zinc-950 border border-zinc-800/80 p-3.5">
+                <div className="text-xs text-zinc-400">Recipients</div>
+                <div className="text-xl font-bold text-white mt-1">{recipients.length}</div>
+              </div>
+              <div className="rounded-xl bg-zinc-950 border border-zinc-800/80 p-3.5">
+                <div className="text-xs text-zinc-400">Total KAS</div>
+                <div className="text-xl font-bold text-emerald-400 mt-1">
+                  {totalKas.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-amber-950/30 border border-amber-700/50 p-3 text-xs text-amber-300">
+              <div className="flex items-center justify-between font-semibold">
+                <span>Service fee</span>
+                <span>{SERVICE_FEE_KAS} KAS</span>
+              </div>
+              <div className="text-amber-400/80 mt-1">
+                 Included in the same atomic transaction as every recipient.
+              </div>
+            </div>
+
+            {review && (
+              <div className="rounded-xl bg-emerald-950/25 border border-emerald-700/50 p-4 text-xs space-y-2">
+                <div className="font-semibold text-emerald-300">Review before signing</div>
+                <div className="flex justify-between"><span className="text-zinc-400">Recipients</span><span>{sompiToKas(review.recipientTotalSompi)} KAS</span></div>
+                <div className="flex justify-between"><span className="text-zinc-400">Service fee</span><span>{sompiToKas(review.serviceFeeSompi)} KAS</span></div>
+                <div className="flex justify-between"><span className="text-zinc-400">Network fee</span><span>{sompiToKas(review.networkFeeSompi)} KAS</span></div>
+                <div className="flex justify-between border-t border-emerald-800/60 pt-2 font-semibold"><span>Grand total</span><span>{sompiToKas(review.grandTotalSompi)} KAS</span></div>
+                <div className="text-[10px] text-zinc-500">Transaction mass: {review.mass.toLocaleString()} / {review.maximumMass.toLocaleString()}</div>
+              </div>
+            )}
+
+            {transactionError && (
+              <div className="rounded-xl bg-red-950/40 border border-red-800/60 p-3 text-xs text-red-300">
+                {transactionError}
+              </div>
+            )}
+
+            {/* Progress during send */}
+            {isProcessing && (signingIdx !== -1 || isFeeSigning) && (
+              <div className="rounded-xl bg-amber-950/30 border border-amber-700/40 p-3 text-xs text-amber-300 flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                {isFeeSigning
+                  ? 'Approve the complete dispersal once in KasWare…'
+                  : `Signing all ${recipients.length} recipients in one transaction…`}
+              </div>
+            )}
+
+            {/* Transfer list */}
+            {recipients.length > 0 && (
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                <div className="text-xs font-medium text-zinc-400 flex justify-between">
+                  <span>Transfers</span>
+                  {sentCount > 0 && <span className="text-emerald-400">{sentCount} sent</span>}
+                  {failedCount > 0 && <span className="text-red-400 ml-2">{failedCount} failed</span>}
+                </div>
+
+                {recipients.map((r, idx) => {
+                  const st = statuses[idx] ?? { status: 'pending', txId: '' };
+                  return (
+                    <div key={idx} className="flex items-center justify-between rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2.5 text-xs">
+                      <div className="min-w-0">
+                        <div className="font-mono text-zinc-400 truncate text-[11px]">
+                          {r.address.slice(0, 16)}…{r.address.slice(-6)}
+                        </div>
+                        <div className="font-semibold text-zinc-200 mt-0.5">{r.amount} KAS</div>
+                        {st.txId && (
+                          <a
+                            href={`https://explorer.kaspa.org/txs/${st.txId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[10px] text-emerald-400 hover:underline flex items-center gap-1 mt-0.5"
+                          >
+                            {st.txId.slice(0, 10)}… <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
+                        )}
+                        {st.error && <div className="text-[10px] text-red-400 mt-0.5">{st.error}</div>}
+                      </div>
+                      <div className="shrink-0 ml-2">
+                        {st.status === 'pending' && <span className="text-zinc-500">Pending</span>}
+                        {st.status === 'signing' && (
+                          <span className="text-amber-400 flex items-center gap-1">
+                            <Loader2 className="h-3 w-3 animate-spin" /> Signing
+                          </span>
+                        )}
+                        {st.status === 'sent' && (
+                          <span className="text-emerald-400 flex items-center gap-1">
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Sent
+                          </span>
+                        )}
+                        {st.status === 'failed' && (
+                          <span className="text-red-400 flex items-center gap-1">
+                            <AlertCircle className="h-3.5 w-3.5" /> Failed
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <div className="flex items-center justify-between rounded-xl bg-amber-950/20 border border-amber-800/50 px-3 py-2.5 text-xs">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-amber-300">Service fee</div>
+                    <div className="font-mono text-amber-400/70 truncate text-[10px]">
+                      {SERVICE_FEE_ADDRESS.slice(0, 16)}…{SERVICE_FEE_ADDRESS.slice(-6)}
+                    </div>
+                    {serviceFeeStatus.txId && (
+                      <a
+                        href={`https://explorer.kaspa.org/txs/${serviceFeeStatus.txId}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-amber-400 hover:underline flex items-center gap-1 mt-0.5"
+                      >
+                        {serviceFeeStatus.txId.slice(0, 10)}… <ExternalLink className="h-2.5 w-2.5" />
+                      </a>
+                    )}
+                    {serviceFeeStatus.error && (
+                      <div className="text-[10px] text-red-400 mt-0.5">{serviceFeeStatus.error}</div>
+                    )}
+                  </div>
+                  <div className="shrink-0 ml-2">
+                    {serviceFeeStatus.status === 'pending' && <span className="text-zinc-500">Same transaction</span>}
+                    {serviceFeeStatus.status === 'signing' && (
+                      <span className="text-amber-400 flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Approve
+                      </span>
+                    )}
+                    {serviceFeeStatus.status === 'sent' && (
+                      <span className="text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Sent
+                      </span>
+                    )}
+                    {serviceFeeStatus.status === 'failed' && (
+                      <span className="text-red-400 flex items-center gap-1">
+                        <AlertCircle className="h-3.5 w-3.5" /> Failed
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Send button */}
+            <button
+              disabled={isProcessing || recipients.length === 0}
+              onClick={review ? handleSignAndBroadcast : handlePrepareReview}
+              className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${
+                isProcessing || recipients.length === 0
+                  ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                  : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-lg shadow-emerald-500/20'
+              }`}
+            >
+              {isProcessing ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> {review ? 'Waiting for KasWare…' : 'Preparing review…'}</>
+              ) : (
+                <><Send className="h-4 w-4" /> {review ? 'Approve & Send Once' : `Review KAS + ${SERVICE_FEE_KAS} KAS Fee`}</>
+              )}
+            </button>
+
+            {recipients.length > 0 && !isProcessing && (
+              <p className="text-[11px] text-zinc-500 text-center">
+                KasWare signs all recipients, the service fee, and change with one approval
+              </p>
+            )}
+          </div>
+        </section>
+      </main>
+
+      {/* WALLET MODAL */}
+      {isWalletModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-zinc-900 border border-zinc-800 p-6 text-white shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
+              <div className="flex items-center gap-2">
+                <Wallet className="h-5 w-5 text-emerald-400" />
+                <h2 className="text-lg font-semibold">Select Wallet</h2>
+              </div>
+              <button
+                onClick={() => setIsWalletModalOpen(false)}
+                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {walletError && (
+              <div className="mt-4 rounded-lg bg-red-950/50 border border-red-800/60 p-3 text-xs text-red-300">
+                {walletError}
+              </div>
+            )}
+
+            <div className="mt-4 space-y-2">
+              {KASPA_WALLETS.map((wallet) => {
+                const isInstalled = wallet.type !== 'extension' || installedMap[wallet.id];
+                const isLoading = walletLoading === wallet.id;
+                return (
+                  <div
+                    key={wallet.id}
+                    onClick={() => isInstalled && !isLoading && handleConnectWallet(wallet)}
+                    className={`flex items-center justify-between p-3.5 rounded-xl border transition cursor-pointer ${
+                      isInstalled
+                        ? 'border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800 hover:border-zinc-700'
+                        : 'border-zinc-800/50 bg-zinc-900/30 opacity-60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-lg bg-zinc-800 p-1 flex items-center justify-center border border-zinc-700/50">
+                        <img
+                          src={wallet.icon}
+                          alt={wallet.name}
+                          className="h-full w-full object-contain"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).onerror = null;
+                            (e.target as HTMLImageElement).src = 'https://kaspa.org/wp-content/uploads/2022/09/kaspa-icon.png';
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-zinc-100">{wallet.name}</div>
+                        <span className="text-[11px] text-zinc-400">
+                          {wallet.type === 'extension'
+                            ? (isInstalled ? 'Browser Extension' : 'Not Installed')
+                            : `${wallet.type.charAt(0).toUpperCase() + wallet.type.slice(1)} Wallet`}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      {isLoading ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
+                      ) : !isInstalled ? (
+                        <a
+                          href={wallet.downloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center gap-1 rounded-lg bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-700"
+                        >
+                          Get <Download className="h-3 w-3" />
+                        </a>
+                      ) : (
+                        <ExternalLink className="h-4 w-4 text-zinc-500" />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-          <div className="grid sm:grid-cols-4 gap-4 mt-12 max-w-4xl mx-auto">
-            {[
-              { icon: Shield, title: 'Transparent' },
-              { icon: PieChart, title: 'Predictable' },
-              { icon: Users, title: 'Community First' },
-              { icon: Lock, title: 'Secure' },
-            ].map(({ icon: Icon, title }) => (
-              <div key={title} className="text-center">
-                <Icon className="h-5 w-5 text-cyan-400 mx-auto mb-2" />
-                <div className="text-sm font-medium text-zinc-300">{title}</div>
-              </div>
-            ))}
-          </div>
         </div>
-      </section>
-
-      <section id="token-distribution" className="border-t border-cyan-900/20 py-20 sm:py-24 bg-[#070b10]/50">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="text-center mb-14">
-            <h2 className="text-2xl sm:text-3xl font-bold text-white">Token Distribution</h2>
-            <p className="mt-3 text-zinc-500 max-w-xl mx-auto">
-              A clear split: burn, team, marketing, and community.
-            </p>
-          </div>
-          <div className="max-w-3xl mx-auto kd-glass-strong rounded-2xl p-8">
-            <TokenDistributionChart />
-          </div>
-        </div>
-      </section>
-
-      <section className="border-t border-cyan-900/20 py-20 sm:py-24">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="text-center mb-12">
-            <h2 className="text-2xl sm:text-3xl font-bold text-white">Made for More Than Token Projects</h2>
-            <p className="mt-3 text-zinc-500 max-w-2xl mx-auto">
-              If you have a Kaspa community and want to reward people in KAS, this tool was built for you.
-            </p>
-          </div>
-          <div className="grid sm:grid-cols-2 gap-6">
-            {AUDIENCES.map(({ icon: Icon, title, body }) => (
-              <div key={title} className="kd-glass rounded-2xl p-6 flex gap-4">
-                <div className="h-11 w-11 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shrink-0">
-                  <Icon className="h-5 w-5 text-cyan-400" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-white mb-1">{title}</h3>
-                  <p className="text-sm text-zinc-500 leading-relaxed">{body}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="border-t border-cyan-900/20 py-24 sm:py-32">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 text-center">
-          <div className="flex justify-center gap-2 mb-6">
-            <Gift className="h-5 w-5 text-cyan-500" />
-            <Send className="h-5 w-5 text-cyan-500" />
-            <Wallet className="h-5 w-5 text-cyan-500" />
-          </div>
-          <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">
-            Your KAS. Your Community. Your Drop.
-          </h2>
-          <p className="text-zinc-400 mb-2">You decide who receives KAS and how much.</p>
-          <p className="text-zinc-300 font-medium mb-10">Bulk distribution made simple.</p>
-          <Link
-            href="/dispenser"
-            className="kd-btn inline-flex items-center gap-2 text-black font-bold px-10 py-4 rounded-xl uppercase tracking-wide text-sm"
-          >
-            <Upload className="h-4 w-4" /> Launch KASDISTRO
-          </Link>
-        </div>
-      </section>
-    </LandingLayout>
+      )}
+    </div>
   );
 }
