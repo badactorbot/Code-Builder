@@ -2,9 +2,9 @@ import { type ReactNode } from 'react';
 import KineticGrid from '@/components/ui/kinetic-grid';
 
 const LINKS = [
+  { label: 'How It Works', href: '/#how-it-works' },
   { label: 'Distro', href: '/#distro' },
   { label: 'Features', href: '/#features' },
-  { label: 'How It Works', href: '/#how-it-works' },
   { label: 'Fees', href: '/#fees' },
   { label: 'Token Distribution', href: '/#token-distribution' },
 ];
@@ -41,9 +41,8 @@ export function LandingLayout({ children }: { children: ReactNode }) {
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-sm text-zinc-500">KASDISTRO</div>
             <div className="flex items-center gap-6 text-xs text-zinc-500">
-              <a href="/#distro" className="hover:text-cyan-400">Distro</a>
-              <a href="/#features" className="hover:text-zinc-300">Features</a>
               <a href="/#how-it-works" className="hover:text-zinc-300">How It Works</a>
+              <a href="/#distro" className="hover:text-cyan-400">Distro</a>
               <a href="/#token-distribution" className="hover:text-zinc-300">Token Distribution</a>
             </div>
           </div>

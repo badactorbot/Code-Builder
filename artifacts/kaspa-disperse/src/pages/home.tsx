@@ -87,6 +87,27 @@ export default function Home() {
           </div>
         </section>
 
+        <section id="how-it-works" className="border-t border-cyan-900/20 py-20 sm:py-24">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6">
+            <div className="text-center mb-14">
+              <h2 className="text-2xl sm:text-3xl font-bold text-white">How It Works</h2>
+              <p className="mt-3 text-zinc-500">From one wallet to many in a few simple steps.</p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-6">
+              {STEPS.map((step) => (
+                <div
+                  key={step.num}
+                  className="kd-glass rounded-2xl p-6 w-full md:w-[calc((100%-1.5rem)/2)] lg:w-[calc((100%-3rem)/3)]"
+                >
+                  <span className="text-cyan-500 font-mono text-sm font-bold">{step.num}</span>
+                  <h3 className="text-lg font-semibold text-white mt-2 mb-2">{step.title}</h3>
+                  <p className="text-sm text-zinc-500 leading-relaxed">{step.body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
         <section id="distro" className="border-t border-cyan-900/20 py-16 sm:py-20">
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <div className="text-center mb-8">
@@ -135,27 +156,6 @@ export default function Home() {
                 <span key={item} className="kd-glass px-4 py-2 rounded-full text-sm text-zinc-300">
                   {item}
                 </span>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section id="how-it-works" className="border-t border-cyan-900/20 py-20 sm:py-24">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6">
-            <div className="text-center mb-14">
-              <h2 className="text-2xl sm:text-3xl font-bold text-white">How It Works</h2>
-              <p className="mt-3 text-zinc-500">From one wallet to many in a few simple steps.</p>
-            </div>
-            <div className="flex flex-wrap justify-center gap-6">
-              {STEPS.map((step) => (
-                <div
-                  key={step.num}
-                  className="kd-glass rounded-2xl p-6 w-full md:w-[calc((100%-1.5rem)/2)] lg:w-[calc((100%-3rem)/3)]"
-                >
-                  <span className="text-cyan-500 font-mono text-sm font-bold">{step.num}</span>
-                  <h3 className="text-lg font-semibold text-white mt-2 mb-2">{step.title}</h3>
-                  <p className="text-sm text-zinc-500 leading-relaxed">{step.body}</p>
-                </div>
               ))}
             </div>
           </div>
