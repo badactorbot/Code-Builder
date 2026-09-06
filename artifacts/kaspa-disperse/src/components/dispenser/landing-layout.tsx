@@ -1,9 +1,8 @@
-import { ArrowRight } from 'lucide-react';
-import { Link } from 'wouter';
 import { type ReactNode } from 'react';
 import KineticGrid from '@/components/ui/kinetic-grid';
 
 const LINKS = [
+  { label: 'Distro', href: '/#distro' },
   { label: 'Features', href: '/#features' },
   { label: 'How It Works', href: '/#how-it-works' },
   { label: 'Fees', href: '/#fees' },
@@ -27,12 +26,12 @@ export function LandingLayout({ children }: { children: ReactNode }) {
                 </a>
               ))}
             </nav>
-            <Link
-              href="/dispenser"
+            <a
+              href="/#distro"
               className="kd-btn ml-auto inline-flex items-center gap-2 text-black font-semibold text-sm px-5 py-2.5 rounded-xl"
             >
-              Launch KASDISTRO <ArrowRight className="h-4 w-4" />
-            </Link>
+              Open Distro
+            </a>
           </div>
         </header>
 
@@ -42,10 +41,10 @@ export function LandingLayout({ children }: { children: ReactNode }) {
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-sm text-zinc-500">KASDISTRO</div>
             <div className="flex items-center gap-6 text-xs text-zinc-500">
+              <a href="/#distro" className="hover:text-cyan-400">Distro</a>
               <a href="/#features" className="hover:text-zinc-300">Features</a>
               <a href="/#how-it-works" className="hover:text-zinc-300">How It Works</a>
               <a href="/#token-distribution" className="hover:text-zinc-300">Token Distribution</a>
-              <Link href="/dispenser" className="hover:text-cyan-400">Launch KASDISTRO</Link>
             </div>
           </div>
         </footer>
