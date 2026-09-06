@@ -17,7 +17,8 @@ import {
 import { LandingLayout } from '@/components/dispenser/landing-layout';
 import { DispenserLogo } from '@/components/dispenser/brand-logo';
 import { TokenDistributionChart } from '@/components/dispenser/token-distribution-chart';
-import { DISTRO_APP_URL, SERVICE_FEE_KAS } from '@/lib/dispenser/constants';
+import Dispenser from '@/pages/dispenser';
+import { SERVICE_FEE_KAS } from '@/lib/dispenser/constants';
 
 const USE_CASES = [
   'Community Rewards',
@@ -116,14 +117,8 @@ export default function Home() {
                 Load your list, set rewards, and send KAS — right here.
               </p>
             </div>
-            <div className="kd-glass-strong rounded-2xl overflow-hidden">
-              <iframe
-                src={DISTRO_APP_URL}
-                title="KASDISTRO Distro"
-                className="w-full h-[min(92dvh,1100px)] bg-[#060a0e] border-0"
-                allow="clipboard-write; clipboard-read"
-                referrerPolicy="strict-origin-when-cross-origin"
-              />
+            <div className="relative z-10 rounded-2xl">
+              <Dispenser embedded />
             </div>
           </div>
         </section>

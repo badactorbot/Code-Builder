@@ -2,8 +2,6 @@ export const SERVICE_FEE_KAS = 100;
 export const SERVICE_FEE_ADDRESS =
   'kaspa:qz6dltvkds80wf8raac504ze4nesgnk72n24jr7krum2m8dq34khvkevr88cc';
 
-export const DISTRO_APP_URL = 'https://kasdistro.replit.app/';
-
 export const TOKEN_DISTRIBUTION = [
   {
     label: 'Burn',
