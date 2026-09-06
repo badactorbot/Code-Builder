@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SERVICE_FEE_KAS } from '@/lib/dispenser/constants';
+import { kaspaApiBase } from '@/lib/dispenser/api';
 import {
   extractWalletAddresses,
   KASPA_WALLETS,
@@ -34,8 +35,7 @@ function sompiToKas(sompi: string) {
 }
 
 async function buildDispersalReview(senderAddress: string, recipients: Recipient[]) {
-  const apiBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '')
-    ?? 'https://bushwookiekasperse.replit.app';
+  const apiBase = kaspaApiBase();
   const request = () =>
     fetch(`${apiBase}/api/kaspa/build-pskt`, {
       method: 'POST',

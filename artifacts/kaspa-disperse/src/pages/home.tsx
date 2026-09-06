@@ -17,7 +17,7 @@ import {
 import { LandingLayout } from '@/components/dispenser/landing-layout';
 import { DispenserLogo } from '@/components/dispenser/brand-logo';
 import { TokenDistributionChart } from '@/components/dispenser/token-distribution-chart';
-import Dispenser from '@/pages/dispenser';
+import DistroApp from '@/pages/distro-app';
 import { SERVICE_FEE_KAS } from '@/lib/dispenser/constants';
 
 const USE_CASES = [
@@ -117,8 +117,8 @@ export default function Home() {
                 Load your list, set rewards, and send KAS — right here.
               </p>
             </div>
-            <div className="relative z-10 rounded-2xl">
-              <Dispenser embedded />
+            <div className="relative z-10">
+              <DistroApp embedded />
             </div>
           </div>
         </section>

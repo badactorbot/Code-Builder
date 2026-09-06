@@ -384,6 +384,32 @@
     inset: -1px;
   }
 
+  .cyber-grid {
+    background-image:
+      linear-gradient(rgba(72, 214, 201, 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(72, 214, 201, 0.07) 1px, transparent 1px);
+    background-size: 50px 50px;
+    background-position: center center;
+    position: relative;
+  }
+
+  .cyber-grid::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at top center, transparent 0%, #030914 80%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .glass-panel {
+    @apply bg-[#030914]/60 backdrop-blur-xl border border-primary/20 shadow-xl;
+  }
+
+  .glass-panel-subtle {
+    @apply bg-[#030914]/40 backdrop-blur-md border border-white/5 shadow-lg;
+  }
+
   .kd-app {
     background: #060a0e;
     background-image:
