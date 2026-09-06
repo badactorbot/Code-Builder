@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Wallet, Upload, Send, CheckCircle2, AlertCircle, X,
-  Download, ExternalLink, Loader2, FileText, Layers,
+  ExternalLink, Loader2, FileText, Layers, Zap, Fingerprint
 } from 'lucide-react';
 
 // ── Wallets ───────────────────────────────────────────────────────────────────
@@ -81,6 +81,15 @@ interface TransactionReview {
   grandTotalSompi: string;
   mass: number;
   maximumMass: number;
+}
+
+function GridBackground() {
+  return (
+    <div className="fixed inset-0 z-[-1] pointer-events-none cyber-grid flex items-center justify-center">
+      {/* Central glow */}
+      <div className="absolute top-[20%] left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-primary/10 rounded-[100%] blur-[120px] pointer-events-none mix-blend-screen"></div>
+    </div>
+  );
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -293,359 +302,410 @@ export default function Home() {
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans flex flex-col">
-
-      {/* NAV */}
-      <nav className="sticky top-0 z-40 border-b border-zinc-800/60 bg-zinc-950/90 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-xl bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/30">
-              <Layers className="h-4 w-4 text-black" />
-            </div>
-            <div>
-              <span className="font-bold text-sm text-white">Kaspa Disperse</span>
-              <p className="text-[10px] text-zinc-500 leading-none">Bulk KAS Sender</p>
-            </div>
-          </div>
-
-          {account ? (
-            <div className="flex items-center gap-2">
-              <div className="hidden sm:block text-right">
-                <div className="text-xs font-medium text-zinc-200">{account.walletName}</div>
-                <div className="text-[11px] text-zinc-500 font-mono">
-                  {account.address.slice(0, 12)}…{account.address.slice(-6)}
-                </div>
-              </div>
-              <button
-                onClick={() => setAccount(null)}
-                className="flex items-center gap-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition"
-              >
-                <X className="h-3.5 w-3.5" /> Disconnect
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setIsWalletModalOpen(true)}
-              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-sm px-4 py-2 rounded-xl transition shadow-lg shadow-emerald-500/20"
-            >
-              <Wallet className="h-4 w-4" /> Connect Wallet
-            </button>
-          )}
-        </div>
-      </nav>
+    <div className="min-h-screen flex flex-col relative z-10 selection:bg-primary/30 selection:text-white">
+      <GridBackground />
 
       {/* MAIN */}
-      <main className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-8 grid lg:grid-cols-12 gap-6 flex-1">
+      <main className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-10 grid lg:grid-cols-12 gap-8 flex-1 items-stretch">
 
         {/* LEFT — Input */}
-        <section className="lg:col-span-7 space-y-6">
-
-          {/* Recipient input */}
-          <div className="rounded-2xl bg-zinc-900 border border-zinc-800 p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
-                <FileText className="h-4 w-4 text-emerald-400" />
-                Recipient Addresses &amp; Amounts
-              </label>
-              <div>
-                <input type="file" accept=".csv,.txt" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition"
-                >
-                  <Upload className="h-3.5 w-3.5" /> Upload CSV
-                </button>
-              </div>
-            </div>
-
-            <textarea
-              rows={12}
-              value={rawInput}
-              onChange={(e) => handleParseInput(e.target.value)}
-              placeholder={`kaspa:qq2... 150.5\nkaspa:qr8... 200\nkaspa:qz7... 50`}
-              className="w-full rounded-xl bg-zinc-950 border border-zinc-800 p-4 font-mono text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition resize-none"
-            />
-
-            <div className="text-xs text-zinc-500 flex justify-between">
-              <span>Format: <code className="text-zinc-400">address amount</code> or <code className="text-zinc-400">address,amount</code></span>
-              <span>One transaction, subject to Kaspa mass limits</span>
-            </div>
-
-            {parseErrors.length > 0 && (
-              <div className="rounded-xl bg-red-950/40 border border-red-800/60 p-4 space-y-1 text-xs text-red-300">
-                <div className="font-semibold flex items-center gap-1">
-                  <AlertCircle className="h-4 w-4" /> Parse errors ({parseErrors.length})
+        <section className="lg:col-span-8 h-full">
+          <div className="glass-panel h-full p-1 rounded-2xl relative overflow-hidden group transition-all duration-500 border-2 border-primary shadow-[0_0_24px_rgba(11,213,188,0.24)]">
+            {/* Ambient hover glow */}
+            <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none blur-xl"></div>
+            
+            <div className="bg-[#050c18]/90 rounded-[14px] p-6 h-full flex flex-col relative z-10">
+              <div className="flex items-center justify-between mb-6">
+                <label className="text-sm font-semibold tracking-wide text-white/90 flex items-center gap-2 uppercase">
+                  <Fingerprint className="h-4 w-4 text-primary" />
+                   Max 100 Wallets per Mass
+                </label>
+                <div>
+                  <input type="file" accept=".csv,.txt" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-2 text-xs font-semibold bg-white/5 hover:bg-white/10 text-white/80 border border-white/10 px-4 py-2 rounded-lg transition-colors hover:border-white/20"
+                  >
+                    <Upload className="h-4 w-4" /> CSV / TXT
+                  </button>
                 </div>
-                <ul className="list-disc list-inside space-y-0.5 text-[11px] opacity-90 max-h-24 overflow-y-auto">
-                  {parseErrors.map((e, i) => <li key={i}>{e}</li>)}
-                </ul>
               </div>
-            )}
+
+              <textarea
+                rows={12}
+                value={rawInput}
+                onChange={(e) => handleParseInput(e.target.value)}
+                placeholder={`Example:\nkaspa:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 0000`}
+                className="w-full flex-1 rounded-xl bg-[#02050a] border border-white/5 p-5 font-mono text-sm text-primary/80 placeholder:text-primary/60 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition resize-none custom-scrollbar shadow-inner"
+              />
+
+              <div className="text-xs text-white/40 flex justify-between mt-4 uppercase tracking-widest font-mono">
+                <span>FMT: ADDR AMT</span>
+                <span>MAX MASS LIMITS APPLY</span>
+              </div>
+
+              {parseErrors.length > 0 && (
+                <div className="mt-4 rounded-xl bg-destructive/10 border border-destructive/20 p-4 space-y-1.5 text-xs text-destructive/90 backdrop-blur-sm">
+                  <div className="font-bold flex items-center gap-1.5 tracking-wide">
+                    <AlertCircle className="h-4 w-4" /> PARSE ERRORS ({parseErrors.length})
+                  </div>
+                  <ul className="list-disc list-inside space-y-1 opacity-80 max-h-24 overflow-y-auto font-mono text-[11px] custom-scrollbar pl-1">
+                    {parseErrors.map((e, i) => <li key={i}>{e}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
         </section>
 
         {/* RIGHT — Summary + Actions */}
-        <section className="lg:col-span-5 space-y-6">
-          <div className="rounded-2xl bg-zinc-900 border border-zinc-800 p-6 shadow-xl space-y-6 sticky top-24">
-
-            <h2 className="text-base font-semibold border-b border-zinc-800 pb-3 flex items-center justify-between">
-              <span>Disperse Summary</span>
-              <Layers className="h-4 w-4 text-emerald-400" />
-            </h2>
-
-            {/* Stats */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-zinc-950 border border-zinc-800/80 p-3.5">
-                <div className="text-xs text-zinc-400">Recipients</div>
-                <div className="text-xl font-bold text-white mt-1">{recipients.length}</div>
-              </div>
-              <div className="rounded-xl bg-zinc-950 border border-zinc-800/80 p-3.5">
-                <div className="text-xs text-zinc-400">Total KAS</div>
-                <div className="text-xl font-bold text-emerald-400 mt-1">
-                  {totalKas.toLocaleString(undefined, { maximumFractionDigits: 8 })}
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-amber-950/30 border border-amber-700/50 p-3 text-xs text-amber-300">
-              <div className="flex items-center justify-between font-semibold">
-                <span>Service fee</span>
-                <span>{SERVICE_FEE_KAS} KAS</span>
-              </div>
-              <div className="text-amber-400/80 mt-1">
-                 Included in the same atomic transaction as every recipient.
-              </div>
-            </div>
-
-            {review && (
-              <div className="rounded-xl bg-emerald-950/25 border border-emerald-700/50 p-4 text-xs space-y-2">
-                <div className="font-semibold text-emerald-300">Review before signing</div>
-                <div className="flex justify-between"><span className="text-zinc-400">Recipients</span><span>{sompiToKas(review.recipientTotalSompi)} KAS</span></div>
-                <div className="flex justify-between"><span className="text-zinc-400">Service fee</span><span>{sompiToKas(review.serviceFeeSompi)} KAS</span></div>
-                <div className="flex justify-between"><span className="text-zinc-400">Network fee</span><span>{sompiToKas(review.networkFeeSompi)} KAS</span></div>
-                <div className="flex justify-between border-t border-emerald-800/60 pt-2 font-semibold"><span>Grand total</span><span>{sompiToKas(review.grandTotalSompi)} KAS</span></div>
-                <div className="text-[10px] text-zinc-500">Transaction mass: {review.mass.toLocaleString()} / {review.maximumMass.toLocaleString()}</div>
-              </div>
-            )}
-
-            {transactionError && (
-              <div className="rounded-xl bg-red-950/40 border border-red-800/60 p-3 text-xs text-red-300">
-                {transactionError}
-              </div>
-            )}
-
-            {/* Progress during send */}
-            {isProcessing && (signingIdx !== -1 || isFeeSigning) && (
-              <div className="rounded-xl bg-amber-950/30 border border-amber-700/40 p-3 text-xs text-amber-300 flex items-center gap-2">
-                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-                {isFeeSigning
-                  ? 'Approve the complete dispersal once in KasWare…'
-                  : `Signing all ${recipients.length} recipients in one transaction…`}
-              </div>
-            )}
-
-            {/* Transfer list */}
-            {recipients.length > 0 && (
-              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                <div className="text-xs font-medium text-zinc-400 flex justify-between">
-                  <span>Transfers</span>
-                  {sentCount > 0 && <span className="text-emerald-400">{sentCount} sent</span>}
-                  {failedCount > 0 && <span className="text-red-400 ml-2">{failedCount} failed</span>}
-                </div>
-
-                {recipients.map((r, idx) => {
-                  const st = statuses[idx] ?? { status: 'pending', txId: '' };
-                  return (
-                    <div key={idx} className="flex items-center justify-between rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2.5 text-xs">
-                      <div className="min-w-0">
-                        <div className="font-mono text-zinc-400 truncate text-[11px]">
-                          {r.address.slice(0, 16)}…{r.address.slice(-6)}
-                        </div>
-                        <div className="font-semibold text-zinc-200 mt-0.5">{r.amount} KAS</div>
-                        {st.txId && (
-                          <a
-                            href={`https://explorer.kaspa.org/txs/${st.txId}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[10px] text-emerald-400 hover:underline flex items-center gap-1 mt-0.5"
-                          >
-                            {st.txId.slice(0, 10)}… <ExternalLink className="h-2.5 w-2.5" />
-                          </a>
-                        )}
-                        {st.error && <div className="text-[10px] text-red-400 mt-0.5">{st.error}</div>}
-                      </div>
-                      <div className="shrink-0 ml-2">
-                        {st.status === 'pending' && <span className="text-zinc-500">Pending</span>}
-                        {st.status === 'signing' && (
-                          <span className="text-amber-400 flex items-center gap-1">
-                            <Loader2 className="h-3 w-3 animate-spin" /> Signing
-                          </span>
-                        )}
-                        {st.status === 'sent' && (
-                          <span className="text-emerald-400 flex items-center gap-1">
-                            <CheckCircle2 className="h-3.5 w-3.5" /> Sent
-                          </span>
-                        )}
-                        {st.status === 'failed' && (
-                          <span className="text-red-400 flex items-center gap-1">
-                            <AlertCircle className="h-3.5 w-3.5" /> Failed
-                          </span>
-                        )}
+        <section className="lg:col-span-4 h-full">
+          <div className="glass-panel h-full p-1 rounded-2xl relative border-2 border-primary shadow-[0_0_24px_rgba(11,213,188,0.24)]">
+            <div className="bg-[#050c18]/90 rounded-[14px] p-6 h-full flex flex-col relative z-10 space-y-6">
+              
+              {/* Wallet Connection Status */}
+              <div className="flex items-center justify-center pb-6 border-b border-white/5">
+                {account ? (
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <div className="text-xs font-bold text-primary">{account.walletName}</div>
+                      <div className="text-[10px] text-white/50 font-mono tracking-wider">
+                        {account.address.slice(0, 10)}…{account.address.slice(-6)}
                       </div>
                     </div>
-                  );
-                })}
-
-                <div className="flex items-center justify-between rounded-xl bg-amber-950/20 border border-amber-800/50 px-3 py-2.5 text-xs">
-                  <div className="min-w-0">
-                    <div className="font-semibold text-amber-300">Service fee</div>
-                    <div className="font-mono text-amber-400/70 truncate text-[10px]">
-                      {SERVICE_FEE_ADDRESS.slice(0, 16)}…{SERVICE_FEE_ADDRESS.slice(-6)}
-                    </div>
-                    {serviceFeeStatus.txId && (
-                      <a
-                        href={`https://explorer.kaspa.org/txs/${serviceFeeStatus.txId}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[10px] text-amber-400 hover:underline flex items-center gap-1 mt-0.5"
-                      >
-                        {serviceFeeStatus.txId.slice(0, 10)}… <ExternalLink className="h-2.5 w-2.5" />
-                      </a>
-                    )}
-                    {serviceFeeStatus.error && (
-                      <div className="text-[10px] text-red-400 mt-0.5">{serviceFeeStatus.error}</div>
-                    )}
+                    <button
+                      onClick={() => setAccount(null)}
+                      className="p-2 bg-white/5 hover:bg-destructive/20 text-white/50 hover:text-destructive rounded-lg transition-colors group"
+                      title="Disconnect"
+                    >
+                      <X className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                    </button>
                   </div>
-                  <div className="shrink-0 ml-2">
-                    {serviceFeeStatus.status === 'pending' && <span className="text-zinc-500">Same transaction</span>}
-                    {serviceFeeStatus.status === 'signing' && (
-                      <span className="text-amber-400 flex items-center gap-1">
-                        <Loader2 className="h-3 w-3 animate-spin" /> Approve
-                      </span>
-                    )}
-                    {serviceFeeStatus.status === 'sent' && (
-                      <span className="text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="h-3.5 w-3.5" /> Sent
-                      </span>
-                    )}
-                    {serviceFeeStatus.status === 'failed' && (
-                      <span className="text-red-400 flex items-center gap-1">
-                        <AlertCircle className="h-3.5 w-3.5" /> Failed
-                      </span>
-                    )}
+                ) : (
+                  <button
+                    onClick={() => setIsWalletModalOpen(true)}
+                    className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-[#02050a] font-bold text-xs px-4 py-2 rounded-lg transition-all glow-primary glow-primary-hover uppercase tracking-wider"
+                  >
+                    <Wallet className="h-3.5 w-3.5" /> Connect Wallet
+                  </button>
+                )}
+              </div>
+
+              {/* Stats */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded-xl bg-black/40 border border-white/5 p-4 shadow-inner relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <Layers className="h-10 w-10 text-white" />
+                  </div>
+                  <div className="text-xs font-semibold text-white/40 tracking-widest uppercase mb-1">Recipients</div>
+                  <div className="text-2xl font-black text-white font-mono">{recipients.length}</div>
+                </div>
+                <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 shadow-inner relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <Zap className="h-10 w-10 text-primary" />
+                  </div>
+                  <div className="text-xs font-semibold text-primary/60 tracking-widest uppercase mb-1">Total Amount</div>
+                  <div className="text-2xl font-black text-primary font-mono tracking-tight">
+                    {totalKas.toLocaleString(undefined, { maximumFractionDigits: 8 })} <span className="text-xs tracking-normal">KAS</span>
                   </div>
                 </div>
               </div>
-            )}
 
-            {/* Send button */}
-            <button
-              disabled={isProcessing || recipients.length === 0}
-              onClick={review ? handleSignAndBroadcast : handlePrepareReview}
-              className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${
-                isProcessing || recipients.length === 0
-                  ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-                  : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-lg shadow-emerald-500/20'
-              }`}
-            >
-              {isProcessing ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> {review ? 'Waiting for KasWare…' : 'Preparing review…'}</>
-              ) : (
-                <><Send className="h-4 w-4" /> {review ? 'Approve & Send Once' : `Review KAS + ${SERVICE_FEE_KAS} KAS Fee`}</>
+              {/* Status Modules */}
+              <div className="space-y-3">
+                <div className="rounded-xl bg-white/5 border border-white/5 p-4 text-xs">
+                  <div className="flex items-center justify-between font-bold text-white/80 uppercase tracking-wider mb-2">
+                    <span>Service Fee</span>
+                    <span className="text-primary font-mono bg-primary/10 px-2 py-0.5 rounded text-[10px] border border-primary/20">{SERVICE_FEE_KAS} KAS</span>
+                  </div>
+                  <div className="text-white/40 leading-relaxed font-light">
+                     Included in the same atomic transaction as every recipient. Fixed cost per batch.
+                  </div>
+                </div>
+
+                {review && (
+                  <div className="rounded-xl bg-primary/10 border border-primary/30 p-4 text-xs space-y-3 shadow-[0_0_15px_rgba(11,213,188,0.1)_inset]">
+                    <div className="font-bold text-primary uppercase tracking-wider flex items-center gap-2">
+                      <Zap className="h-3.5 w-3.5" /> Review Transaction
+                    </div>
+                    <div className="space-y-2 font-mono text-[11px]">
+                      <div className="flex justify-between items-end"><span className="text-white/50 uppercase">Recipients</span><span className="text-white">{sompiToKas(review.recipientTotalSompi)} KAS</span></div>
+                      <div className="flex justify-between items-end"><span className="text-white/50 uppercase">Service fee</span><span className="text-white">{sompiToKas(review.serviceFeeSompi)} KAS</span></div>
+                      <div className="flex justify-between items-end"><span className="text-white/50 uppercase">Network fee</span><span className="text-white/80">{sompiToKas(review.networkFeeSompi)} KAS</span></div>
+                    </div>
+                    <div className="flex justify-between border-t border-primary/20 pt-3 font-black text-primary text-sm font-mono items-end">
+                      <span className="uppercase tracking-widest text-xs">Grand Total</span>
+                      <span>{sompiToKas(review.grandTotalSompi)} KAS</span>
+                    </div>
+                    <div className="text-[9px] text-white/30 uppercase tracking-widest flex justify-between font-mono">
+                      <span>Mass: {review.mass.toLocaleString()} / {review.maximumMass.toLocaleString()}</span>
+                    </div>
+                  </div>
+                )}
+
+                {transactionError && (
+                  <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-4 text-xs text-destructive/90 backdrop-blur-sm leading-relaxed">
+                    {transactionError}
+                  </div>
+                )}
+              </div>
+
+              {/* Progress during send */}
+              {isProcessing && (signingIdx !== -1 || isFeeSigning) && (
+                <div className="rounded-xl bg-primary/10 border border-primary/30 p-4 text-xs text-primary flex items-center gap-3 shadow-[0_0_15px_rgba(11,213,188,0.1)_inset] animate-pulse">
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                  <span className="font-semibold tracking-wide">
+                    {isFeeSigning
+                      ? 'APPROVING COMPLETE BATCH IN KASWARE...'
+                      : `SIGNING ${recipients.length} RECIPIENTS...`}
+                  </span>
+                </div>
               )}
-            </button>
 
-            {recipients.length > 0 && !isProcessing && (
-              <p className="text-[11px] text-zinc-500 text-center">
-                KasWare signs all recipients, the service fee, and change with one approval
-              </p>
-            )}
+              {/* Transfer list */}
+              {recipients.length > 0 && (
+                <div className="flex flex-col min-h-0">
+                  <div className="text-[10px] font-bold text-white/30 flex justify-between uppercase tracking-widest mb-3">
+                    <span>Distribution Queue</span>
+                    <div className="flex gap-3">
+                      {sentCount > 0 && <span className="text-primary">{sentCount} SENT</span>}
+                      {failedCount > 0 && <span className="text-destructive">{failedCount} FAILED</span>}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 max-h-[34rem] overflow-y-auto pr-2 custom-scrollbar">
+                    {recipients.map((r, idx) => {
+                      const st = statuses[idx] ?? { status: 'pending', txId: '' };
+                      return (
+                        <div key={idx} className="flex min-h-[46px] items-center justify-between rounded-lg bg-black/30 border border-white/5 p-3 text-xs group hover:bg-black/50 transition-colors">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-baseline justify-between mb-1 pr-4">
+                              <div className="font-mono font-bold text-white tracking-tight">{r.amount} KAS</div>
+                              <div className="font-mono text-white/40 truncate text-[10px] group-hover:text-white/60 transition-colors">
+                                {r.address.slice(0, 12)}…{r.address.slice(-6)}
+                              </div>
+                            </div>
+                            {st.txId && (
+                              <a
+                                href={`https://explorer.kaspa.org/txs/${st.txId}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[9px] text-primary hover:text-primary/70 flex items-center gap-1 font-mono tracking-widest transition-colors w-max"
+                              >
+                                TX: {st.txId.slice(0, 12)}… <ExternalLink className="h-2.5 w-2.5" />
+                              </a>
+                            )}
+                            {st.error && <div className="text-[10px] text-destructive mt-1 font-mono">{st.error}</div>}
+                          </div>
+                          <div className="shrink-0 flex items-center justify-end w-20">
+                            {st.status === 'pending' && <span className="text-white/20 text-[10px] uppercase font-bold tracking-wider">Pending</span>}
+                            {st.status === 'signing' && (
+                              <span className="text-primary flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider">
+                                <Loader2 className="h-3 w-3 animate-spin" /> Sign
+                              </span>
+                            )}
+                            {st.status === 'sent' && (
+                              <span className="text-primary flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider">
+                                <CheckCircle2 className="h-3.5 w-3.5" /> Sent
+                              </span>
+                            )}
+                            {st.status === 'failed' && (
+                              <span className="text-destructive flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider">
+                                <AlertCircle className="h-3.5 w-3.5" /> Fail
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-lg bg-primary/5 border border-primary/20 p-3 text-xs mt-3 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-primary"></div>
+                    <div className="min-w-0 flex-1 pl-2">
+                      <div className="flex items-baseline justify-between mb-1 pr-4">
+                        <div className="font-bold text-primary uppercase tracking-wider text-[10px]">Service Fee</div>
+                        <div className="font-mono text-primary/40 truncate text-[10px]">
+                          {SERVICE_FEE_ADDRESS.slice(0, 10)}…{SERVICE_FEE_ADDRESS.slice(-6)}
+                        </div>
+                      </div>
+                      {serviceFeeStatus.txId && (
+                        <a
+                          href={`https://explorer.kaspa.org/txs/${serviceFeeStatus.txId}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[9px] text-primary hover:text-white flex items-center gap-1 font-mono tracking-widest transition-colors w-max"
+                        >
+                          TX: {serviceFeeStatus.txId.slice(0, 12)}… <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      )}
+                      {serviceFeeStatus.error && (
+                        <div className="text-[10px] text-destructive mt-1 font-mono">{serviceFeeStatus.error}</div>
+                      )}
+                    </div>
+                    <div className="shrink-0 flex items-center justify-end w-24">
+                      {serviceFeeStatus.status === 'pending' && <span className="text-white/20 text-[9px] uppercase font-bold tracking-wider text-right leading-tight">Same TX</span>}
+                      {serviceFeeStatus.status === 'signing' && (
+                        <span className="text-primary flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider">
+                          <Loader2 className="h-3 w-3 animate-spin" /> Apprv
+                        </span>
+                      )}
+                      {serviceFeeStatus.status === 'sent' && (
+                        <span className="text-primary flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider">
+                          <CheckCircle2 className="h-3.5 w-3.5" /> Sent
+                        </span>
+                      )}
+                      {serviceFeeStatus.status === 'failed' && (
+                        <span className="text-destructive flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider">
+                          <AlertCircle className="h-3.5 w-3.5" /> Fail
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Keep the action anchored independently of queue length. */}
+              <div className="flex-1 min-h-4"></div>
+
+              {/* Action Button */}
+              <div className="pt-2">
+                <button
+                  disabled={isProcessing || recipients.length === 0}
+                  onClick={review ? handleSignAndBroadcast : handlePrepareReview}
+                  className={`w-full py-4 rounded-xl font-black text-sm tracking-widest uppercase flex items-center justify-center gap-3 transition-all duration-300 relative overflow-hidden ${
+                    isProcessing || recipients.length === 0
+                      ? 'bg-white/5 text-white/20 cursor-not-allowed border border-white/5'
+                      : 'bg-primary hover:bg-[#0cf2d5] text-[#02050a] glow-primary glow-primary-hover border border-transparent hover:scale-[1.02]'
+                  }`}
+                >
+                  {!isProcessing && recipients.length > 0 && (
+                    <div className="absolute inset-0 bg-white/20 translate-y-[100%] hover:translate-y-0 transition-transform duration-300 pointer-events-none"></div>
+                  )}
+                  
+                  {isProcessing ? (
+                    <><Loader2 className="h-5 w-5 animate-spin" /> {review ? 'AWAITING KASWARE...' : 'PREPARING TX...'}</>
+                  ) : (
+                    <><Send className="h-4 w-4" /> {review ? 'SIGN & BROADCAST' : 'REVIEW TRANSACTION'}</>
+                  )}
+                </button>
+
+                {recipients.length > 0 && !isProcessing && (
+                  <p className="text-[10px] text-white/30 text-center mt-4 uppercase tracking-widest font-mono">
+                    All outputs signed in <span className="text-white/60 font-bold">one approval</span>
+                  </p>
+                )}
+              </div>
+
+            </div>
           </div>
         </section>
       </main>
 
       {/* WALLET MODAL */}
       {isWalletModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-zinc-900 border border-zinc-800 p-6 text-white shadow-2xl">
-            <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
-              <div className="flex items-center gap-2">
-                <Wallet className="h-5 w-5 text-emerald-400" />
-                <h2 className="text-lg font-semibold">Select Wallet</h2>
-              </div>
-              <button
-                onClick={() => setIsWalletModalOpen(false)}
-                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {walletError && (
-              <div className="mt-4 rounded-lg bg-red-950/50 border border-red-800/60 p-3 text-xs text-red-300">
-                {walletError}
-              </div>
-            )}
-
-            <div className="mt-4 space-y-2">
-              {KASPA_WALLETS.map((wallet) => {
-                const isInstalled = wallet.type !== 'extension' || installedMap[wallet.id];
-                const isLoading = walletLoading === wallet.id;
-                return (
-                  <div
-                    key={wallet.id}
-                    onClick={() => isInstalled && !isLoading && handleConnectWallet(wallet)}
-                    className={`flex items-center justify-between p-3.5 rounded-xl border transition cursor-pointer ${
-                      isInstalled
-                        ? 'border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800 hover:border-zinc-700'
-                        : 'border-zinc-800/50 bg-zinc-900/30 opacity-60'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-lg bg-zinc-800 p-1 flex items-center justify-center border border-zinc-700/50">
-                        <img
-                          src={wallet.icon}
-                          alt={wallet.name}
-                          className="h-full w-full object-contain"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).onerror = null;
-                            (e.target as HTMLImageElement).src = 'https://kaspa.org/wp-content/uploads/2022/09/kaspa-icon.png';
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-zinc-100">{wallet.name}</div>
-                        <span className="text-[11px] text-zinc-400">
-                          {wallet.type === 'extension'
-                            ? (isInstalled ? 'Browser Extension' : 'Not Installed')
-                            : `${wallet.type.charAt(0).toUpperCase() + wallet.type.slice(1)} Wallet`}
-                        </span>
-                      </div>
-                    </div>
-                    <div>
-                      {isLoading ? (
-                        <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
-                      ) : !isInstalled ? (
-                        <a
-                          href={wallet.downloadUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="flex items-center gap-1 rounded-lg bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-700"
-                        >
-                          Get <Download className="h-3 w-3" />
-                        </a>
-                      ) : (
-                        <ExternalLink className="h-4 w-4 text-zinc-500" />
-                      )}
-                    </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#02050a]/90 backdrop-blur-md p-4">
+          <div className="glass-panel p-1 rounded-2xl w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-[#050c18] rounded-[14px] p-6 relative overflow-hidden shadow-2xl">
+              
+              {/* Modal decorative grid */}
+              <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:20px_20px] pointer-events-none"></div>
+              
+              <div className="relative z-10 flex items-center justify-between pb-6 border-b border-white/10 mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="bg-primary/10 p-2 rounded-lg border border-primary/20">
+                    <Wallet className="h-5 w-5 text-primary" />
                   </div>
-                );
-              })}
+                  <h2 className="text-lg font-bold tracking-wide uppercase text-white/90">CONNECT WALLET</h2>
+                </div>
+                <button
+                  onClick={() => setIsWalletModalOpen(false)}
+                  className="rounded-lg p-2 text-white/40 hover:bg-white/10 hover:text-white transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="relative z-10 space-y-3">
+                {walletError && (
+                  <div className="mb-4 rounded-xl bg-destructive/10 border border-destructive/20 p-4 text-xs text-destructive/90 flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    {walletError}
+                  </div>
+                )}
+
+                {KASPA_WALLETS.map((wallet) => {
+                  const isInstalled = wallet.type !== 'extension' || installedMap[wallet.id];
+                  const isLoading = walletLoading === wallet.id;
+                  
+                  return (
+                    <div
+                      key={wallet.id}
+                      onClick={() => isInstalled && !isLoading && handleConnectWallet(wallet)}
+                      className={`group flex items-center justify-between p-4 rounded-xl border transition-all duration-300 ${
+                        isInstalled
+                          ? 'border-white/10 bg-white/5 hover:bg-primary/5 hover:border-primary/30 cursor-pointer hover:shadow-[0_0_15px_rgba(11,213,188,0.1)_inset]'
+                          : 'border-white/5 bg-black/40 opacity-50 cursor-not-allowed'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="h-10 w-10 rounded-lg bg-black/50 p-2 flex items-center justify-center border border-white/5 group-hover:border-primary/20 transition-colors">
+                          <img
+                            src={wallet.icon}
+                            alt={wallet.name}
+                            className="h-full w-full object-contain filter grayscale group-hover:grayscale-0 transition-all duration-300"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).onerror = null;
+                              (e.target as HTMLImageElement).src = 'https://kaspa.org/wp-content/uploads/2022/09/kaspa-icon.png';
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <div className="text-sm font-bold text-white tracking-wide">{wallet.name}</div>
+                          <span className="text-[10px] text-white/40 uppercase tracking-widest font-mono mt-0.5 block">
+                            {wallet.type === 'extension'
+                              ? (isInstalled ? 'BROWSER EXT' : 'NOT INSTALLED')
+                              : `APP`}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="shrink-0">
+                        {isLoading ? (
+                          <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                        ) : isInstalled ? (
+                          <div className="h-6 w-6 rounded-full border border-white/10 flex items-center justify-center group-hover:border-primary/40 group-hover:bg-primary/10 transition-colors">
+                            <div className="h-1.5 w-1.5 rounded-full bg-white/20 group-hover:bg-primary group-hover:shadow-[0_0_5px_rgba(11,213,188,0.8)] transition-all"></div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
       )}
+      
+      {/* Global CSS injected specifically for the scrollbar to match the theme */}
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.02);
+          border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(11, 213, 188, 0.2);
+          border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(11, 213, 188, 0.4);
+        }
+      `}</style>
     </div>
   );
 }
