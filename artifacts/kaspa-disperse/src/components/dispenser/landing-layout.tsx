@@ -2,11 +2,9 @@ import { type ReactNode } from 'react';
 import KineticGrid from '@/components/ui/kinetic-grid';
 
 const LINKS = [
-  { label: 'Features', href: '/#features' },
-  { label: 'How It Works', href: '/#how-it-works' },
-  { label: 'Fees', href: '/#fees' },
-  { label: 'Token Distribution', href: '/#token-distribution' },
+  { label: 'How to use', href: '/#how-it-works' },
   { label: 'Distro', href: '/#distro' },
+  { label: 'Token Distribution', href: '/#token-distribution' },
 ];
 
 export function LandingLayout({ children }: { children: ReactNode }) {
@@ -41,10 +39,9 @@ export function LandingLayout({ children }: { children: ReactNode }) {
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-sm text-zinc-500">KASDISTRO</div>
             <div className="flex items-center gap-6 text-xs text-zinc-500">
-              <a href="/#features" className="hover:text-zinc-800">Features</a>
-              <a href="/#how-it-works" className="hover:text-zinc-800">How It Works</a>
-              <a href="/#token-distribution" className="hover:text-zinc-800">Token Distribution</a>
+              <a href="/#how-it-works" className="hover:text-zinc-800">How to use</a>
               <a href="/#distro" className="hover:text-cyan-700">Distro</a>
+              <a href="/#token-distribution" className="hover:text-zinc-800">Token Distribution</a>
             </div>
           </div>
         </footer>
