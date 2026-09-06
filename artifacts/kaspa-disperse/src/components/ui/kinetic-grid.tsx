@@ -339,7 +339,7 @@ export default function KineticGrid({
     <div
       ref={containerRef}
       className={cn(
-        'relative w-full min-h-[min(100vh,820px)] overflow-hidden',
+        'relative w-full h-full min-h-full overflow-hidden',
         globalColor === 'monochrome' ? 'bg-[#000000]' : 'bg-[#060a0e]',
         className,
       )}
