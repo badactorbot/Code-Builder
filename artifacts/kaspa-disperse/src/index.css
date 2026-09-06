@@ -494,16 +494,4 @@
     background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.6), transparent);
     height: 2px;
   }
-
-  .kd-landing-light .kd-glass {
-    background: rgba(255, 255, 255, 0.72);
-    border: 1px solid rgba(8, 145, 178, 0.16);
-    box-shadow: 0 10px 30px rgba(15, 48, 64, 0.06);
-  }
-
-  .kd-landing-light .kd-glass-strong {
-    background: rgba(255, 255, 255, 0.86);
-    border: 1px solid rgba(8, 145, 178, 0.22);
-    box-shadow: 0 12px 40px rgba(15, 48, 64, 0.08);
-  }
 }

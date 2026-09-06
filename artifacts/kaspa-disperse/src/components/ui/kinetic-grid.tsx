@@ -48,7 +48,7 @@ export default function KineticGrid({
 }: {
   children?: ReactNode;
   className?: string;
-  globalColor?: 'default' | 'monochrome' | 'light';
+  globalColor?: 'default' | 'monochrome';
   pinned?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -132,54 +132,29 @@ export default function KineticGrid({
       const mouse = mouseRef.current;
       const ripples = ripplesRef.current;
 
-      const theme = (() => {
-        switch (globalColor) {
-          case 'default':
-            return {
-              bg: '#060a0e',
-              lineBase: LINE_BASE,
-              lineActive: { r: 34, g: 211, b: 238, a: 0.9 },
-              nodeBase: { r: 255, g: 255, b: 255, a: 0.2 },
-              nodeActive: { r: 34, g: 211, b: 238, a: 1.0 },
-              glow: '34,211,238',
-              ripple: '34,211,238',
-              dots: 'rgba(255,255,255,0.05)',
-            };
-          case 'monochrome':
-            return {
-              bg: '#000000',
-              lineBase: LINE_BASE,
-              lineActive: { r: 255, g: 255, b: 255, a: 0.9 },
-              nodeBase: { r: 255, g: 255, b: 255, a: 0.2 },
-              nodeActive: { r: 255, g: 255, b: 255, a: 1.0 },
-              glow: '255,255,255',
-              ripple: '255,255,255',
-              dots: 'rgba(255,255,255,0.05)',
-            };
-          case 'light':
-            return {
-              bg: '#e8eef3',
-              lineBase: { r: 15, g: 48, b: 64, a: 0.12 },
-              lineActive: { r: 8, g: 145, b: 178, a: 0.8 },
-              nodeBase: { r: 15, g: 48, b: 64, a: 0.18 },
-              nodeActive: { r: 8, g: 145, b: 178, a: 1.0 },
-              glow: '8,145,178',
-              ripple: '8,145,178',
-              dots: 'rgba(15,48,64,0.1)',
-            };
-          default: {
-            const _exhaustive: never = globalColor;
-            throw new Error(`Unhandled kinetic grid color: ${String(_exhaustive)}`);
-          }
-        }
-      })();
+      const theme = {
+        default: {
+          bg: '#060a0e',
+          lineActive: { r: 34, g: 211, b: 238, a: 0.9 },
+          nodeActive: { r: 34, g: 211, b: 238, a: 1.0 },
+          glow: '34,211,238',
+          ripple: '34,211,238',
+        },
+        monochrome: {
+          bg: '#000000',
+          lineActive: { r: 255, g: 255, b: 255, a: 0.9 },
+          nodeActive: { r: 255, g: 255, b: 255, a: 1.0 },
+          glow: '255,255,255',
+          ripple: '255,255,255',
+        },
+      }[globalColor ?? 'default'];
 
       ctx.clearRect(0, 0, W, H);
 
       ctx.fillStyle = theme.bg;
       ctx.fillRect(0, 0, W, H);
 
-      ctx.fillStyle = theme.dots;
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
       for (let x = DOT_SPACING / 2; x < W; x += DOT_SPACING) {
         for (let y = DOT_SPACING / 2; y < H; y += DOT_SPACING) {
           ctx.beginPath();
@@ -229,7 +204,7 @@ export default function KineticGrid({
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
-        ctx.strokeStyle = lerpColor(theme.lineBase, theme.lineActive, t);
+        ctx.strokeStyle = lerpColor(LINE_BASE, theme.lineActive, t);
         ctx.lineWidth = lerpN(0.8, 1.5, t);
         ctx.stroke();
       };
@@ -268,7 +243,7 @@ export default function KineticGrid({
 
           ctx.beginPath();
           ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-          ctx.fillStyle = lerpColor(theme.nodeBase, theme.nodeActive, t);
+          ctx.fillStyle = lerpColor({ r: 255, g: 255, b: 255, a: 0.2 }, theme.nodeActive, t);
           ctx.fill();
         }
       }
@@ -373,7 +348,7 @@ export default function KineticGrid({
       className={cn(
         'relative w-full',
         pinned ? 'min-h-dvh overflow-visible' : 'h-full min-h-full overflow-hidden',
-        globalColor === 'monochrome' ? 'bg-[#000000]' : globalColor === 'light' ? 'bg-[#e8eef3]' : 'bg-[#060a0e]',
+        globalColor === 'monochrome' ? 'bg-[#000000]' : 'bg-[#060a0e]',
         pinned && 'bg-transparent',
         className,
       )}
