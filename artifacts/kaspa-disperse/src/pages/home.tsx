@@ -2,12 +2,13 @@ import { ArrowRight } from 'lucide-react';
 import { Link } from 'wouter';
 import { LandingLayout } from '@/components/dispenser/landing-layout';
 import { DispenserLogo } from '@/components/dispenser/brand-logo';
+import { TokenDistributionChart } from '@/components/dispenser/token-distribution-chart';
 import KineticGrid from '@/components/ui/kinetic-grid';
 
 export default function Home() {
   return (
     <LandingLayout>
-      <KineticGrid className="h-full min-h-full">
+      <KineticGrid className="h-dvh min-h-dvh">
         <div className="flex h-full min-h-full flex-col items-center justify-center px-4 sm:px-6 py-24 text-center">
           <DispenserLogo size="hero" className="mb-8" />
           <p className="mb-6 rounded-full border border-cyan-500/25 bg-cyan-500/5 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300/90">
@@ -37,6 +38,20 @@ export default function Home() {
           </div>
         </div>
       </KineticGrid>
+
+      <section id="token-distribution" className="border-t border-cyan-900/20 py-20 sm:py-24 bg-[#070b10]/50">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="text-center mb-14">
+            <h2 className="text-2xl sm:text-3xl font-bold text-white">Token Distribution</h2>
+            <p className="mt-3 text-zinc-500 max-w-xl mx-auto">
+              A clear split: burn, dev, team, marketing, and community.
+            </p>
+          </div>
+          <div className="max-w-3xl mx-auto kd-glass-strong rounded-2xl p-8">
+            <TokenDistributionChart />
+          </div>
+        </div>
+      </section>
     </LandingLayout>
   );
 }

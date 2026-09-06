@@ -4,7 +4,7 @@ import { type ReactNode } from 'react';
 
 export function LandingLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="kd-app relative h-dvh overflow-hidden text-zinc-100">
+    <div className="kd-app relative min-h-dvh text-zinc-100">
       <header className="absolute top-0 inset-x-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-end">
           <Link
@@ -15,7 +15,7 @@ export function LandingLayout({ children }: { children: ReactNode }) {
           </Link>
         </div>
       </header>
-      <main className="h-full">{children}</main>
+      <main>{children}</main>
     </div>
   );
 }

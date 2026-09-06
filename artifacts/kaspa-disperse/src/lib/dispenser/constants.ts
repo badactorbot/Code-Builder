@@ -10,8 +10,14 @@ export const TOKEN_DISTRIBUTION = [
     description: 'Permanently removed from circulation.',
   },
   {
+    label: 'Dev',
+    pct: 1,
+    color: '#c084fc',
+    description: 'Allocated to ongoing product development.',
+  },
+  {
     label: 'Team',
-    pct: 5,
+    pct: 4,
     color: '#818cf8',
     description: 'Supports continued development and operations.',
   },
