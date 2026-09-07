@@ -67,10 +67,10 @@ export default function Home() {
             Reward Your Community in{' '}
             <span className="kd-gradient-text">KAS</span>
           </h1>
-          <p className="mt-6 text-lg sm:text-xl text-white/55 max-w-2xl">
+          <p className="mt-6 text-lg sm:text-xl text-cyan-300/90 max-w-2xl">
             One tool. Multiple wallets. One transaction flow.
           </p>
-          <p className="mt-4 text-base text-white/40 max-w-3xl leading-relaxed">
+          <p className="mt-4 text-base text-cyan-300/90 max-w-3xl leading-relaxed">
             KASDISTRO gives projects, creators, communities, and teams an easy way to
             distribute KAS rewards to multiple wallet addresses at once.
           </p>
