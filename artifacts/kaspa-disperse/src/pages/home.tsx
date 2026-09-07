@@ -2,16 +2,13 @@ import {
   ArrowRight,
   Building2,
   Coins,
-  Gift,
   Lock,
   PieChart,
   Rocket,
-  Send,
   Shield,
   Sparkles,
   Upload,
   Users,
-  Wallet,
   Zap,
 } from 'lucide-react';
 import { LandingLayout } from '@/components/dispenser/landing-layout';
@@ -240,11 +237,6 @@ export default function Home() {
 
         <section className="border-t border-cyan-900/20 py-24 sm:py-32">
           <div className="max-w-3xl mx-auto px-4 sm:px-6 text-center">
-            <div className="flex justify-center gap-2 mb-6">
-              <Gift className="h-5 w-5 text-cyan-500" />
-              <Send className="h-5 w-5 text-cyan-500" />
-              <Wallet className="h-5 w-5 text-cyan-500" />
-            </div>
             <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">
               Your KAS. Your Community. Your Drop.
             </h2>
