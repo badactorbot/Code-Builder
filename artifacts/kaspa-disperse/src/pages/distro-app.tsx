@@ -335,7 +335,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                   <input type="file" accept=".csv,.txt" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-2 text-xs font-semibold bg-white/5 hover:bg-white/10 text-white/80 border border-white/10 px-4 py-2 rounded-lg transition-colors hover:border-white/20"
+                    className="flex items-center gap-2 text-xs font-semibold bg-white/5 hover:bg-white/10 text-cyan-100 border border-white/10 px-4 py-2 rounded-lg transition-colors hover:border-white/20"
                   >
                     <Upload className="h-4 w-4" /> CSV / TXT
                   </button>
@@ -350,7 +350,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                 className="w-full flex-1 rounded-xl bg-[#02050a] border border-white/5 p-5 font-mono text-sm text-primary/80 placeholder:text-primary/60 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition resize-none custom-scrollbar shadow-inner"
               />
 
-              <div className="text-xs text-white/40 flex justify-between mt-4 uppercase tracking-widest font-mono">
+              <div className="text-xs text-cyan-200 flex justify-between mt-4 uppercase tracking-widest font-mono">
                 <span>FMT: ADDR AMT</span>
                 <span>MAX MASS LIMITS APPLY</span>
               </div>
@@ -380,13 +380,13 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                   <div className="flex items-center gap-3">
                     <div className="text-right">
                       <div className="text-xs font-bold text-primary">{account.walletName}</div>
-                      <div className="text-[10px] text-white/50 font-mono tracking-wider">
+                      <div className="text-[10px] text-cyan-200 font-mono tracking-wider">
                         {account.address.slice(0, 10)}…{account.address.slice(-6)}
                       </div>
                     </div>
                     <button
                       onClick={() => setAccount(null)}
-                      className="p-2 bg-white/5 hover:bg-destructive/20 text-white/50 hover:text-destructive rounded-lg transition-colors group"
+                      className="p-2 bg-white/5 hover:bg-destructive/20 text-cyan-200 hover:text-destructive rounded-lg transition-colors group"
                       title="Disconnect"
                     >
                       <X className="h-4 w-4 group-hover:scale-110 transition-transform" />
@@ -408,7 +408,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                   <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
                     <Layers className="h-10 w-10 text-white" />
                   </div>
-                  <div className="text-xs font-semibold text-white/40 tracking-widest uppercase mb-1">Recipients</div>
+                  <div className="text-xs font-semibold text-cyan-200 tracking-widest uppercase mb-1">Recipients</div>
                   <div className="text-2xl font-black text-white font-mono">{recipients.length}</div>
                 </div>
                 <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 shadow-inner relative overflow-hidden group">
@@ -425,11 +425,11 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
               {/* Status Modules */}
               <div className="space-y-3">
                 <div className="rounded-xl bg-white/5 border border-white/5 p-4 text-xs">
-                  <div className="flex items-center justify-between font-bold text-white/80 uppercase tracking-wider mb-2">
+                  <div className="flex items-center justify-between font-bold text-cyan-100 uppercase tracking-wider mb-2">
                     <span>Service Fee</span>
                     <span className="text-primary font-mono bg-primary/10 px-2 py-0.5 rounded text-[10px] border border-primary/20">{SERVICE_FEE_KAS} KAS</span>
                   </div>
-                  <div className="text-white/40 leading-relaxed font-light">
+                  <div className="text-cyan-200 leading-relaxed font-light">
                      Included in the same atomic transaction as every recipient. Fixed cost per batch.
                   </div>
                 </div>
@@ -440,15 +440,15 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                       <Zap className="h-3.5 w-3.5" /> Review Transaction
                     </div>
                     <div className="space-y-2 font-mono text-[11px]">
-                      <div className="flex justify-between items-end"><span className="text-white/50 uppercase">Recipients</span><span className="text-white">{sompiToKas(review.recipientTotalSompi)} KAS</span></div>
-                      <div className="flex justify-between items-end"><span className="text-white/50 uppercase">Service fee</span><span className="text-white">{sompiToKas(review.serviceFeeSompi)} KAS</span></div>
-                      <div className="flex justify-between items-end"><span className="text-white/50 uppercase">Network fee</span><span className="text-white/80">{sompiToKas(review.networkFeeSompi)} KAS</span></div>
+                      <div className="flex justify-between items-end"><span className="text-cyan-200 uppercase">Recipients</span><span className="text-white">{sompiToKas(review.recipientTotalSompi)} KAS</span></div>
+                      <div className="flex justify-between items-end"><span className="text-cyan-200 uppercase">Service fee</span><span className="text-white">{sompiToKas(review.serviceFeeSompi)} KAS</span></div>
+                      <div className="flex justify-between items-end"><span className="text-cyan-200 uppercase">Network fee</span><span className="text-cyan-100">{sompiToKas(review.networkFeeSompi)} KAS</span></div>
                     </div>
                     <div className="flex justify-between border-t border-primary/20 pt-3 font-black text-primary text-sm font-mono items-end">
                       <span className="uppercase tracking-widest text-xs">Grand Total</span>
                       <span>{sompiToKas(review.grandTotalSompi)} KAS</span>
                     </div>
-                    <div className="text-[9px] text-white/30 uppercase tracking-widest flex justify-between font-mono">
+                    <div className="text-[9px] text-cyan-200 uppercase tracking-widest flex justify-between font-mono">
                       <span>Mass: {review.mass.toLocaleString()} / {review.maximumMass.toLocaleString()}</span>
                     </div>
                   </div>
@@ -476,7 +476,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
               {/* Transfer list */}
               {recipients.length > 0 && (
                 <div className="flex flex-col min-h-0">
-                  <div className="text-[10px] font-bold text-white/30 flex justify-between uppercase tracking-widest mb-3">
+                  <div className="text-[10px] font-bold text-cyan-200 flex justify-between uppercase tracking-widest mb-3">
                     <span>Distribution Queue</span>
                     <div className="flex gap-3">
                       {sentCount > 0 && <span className="text-primary">{sentCount} SENT</span>}
@@ -492,7 +492,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                           <div className="min-w-0 flex-1">
                             <div className="flex items-baseline justify-between mb-1 pr-4">
                               <div className="font-mono font-bold text-white tracking-tight">{r.amount} KAS</div>
-                              <div className="font-mono text-white/40 truncate text-[10px] group-hover:text-white/60 transition-colors">
+                              <div className="font-mono text-cyan-200 truncate text-[10px] group-hover:text-cyan-100 transition-colors">
                                 {r.address.slice(0, 12)}…{r.address.slice(-6)}
                               </div>
                             </div>
@@ -509,7 +509,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                             {st.error && <div className="text-[10px] text-destructive mt-1 font-mono">{st.error}</div>}
                           </div>
                           <div className="shrink-0 flex items-center justify-end w-20">
-                            {st.status === 'pending' && <span className="text-white/20 text-[10px] uppercase font-bold tracking-wider">Pending</span>}
+                            {st.status === 'pending' && <span className="text-cyan-200/50 text-[10px] uppercase font-bold tracking-wider">Pending</span>}
                             {st.status === 'signing' && (
                               <span className="text-primary flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider">
                                 <Loader2 className="h-3 w-3 animate-spin" /> Sign
@@ -555,7 +555,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                       )}
                     </div>
                     <div className="shrink-0 flex items-center justify-end w-24">
-                      {serviceFeeStatus.status === 'pending' && <span className="text-white/20 text-[9px] uppercase font-bold tracking-wider text-right leading-tight">Same TX</span>}
+                      {serviceFeeStatus.status === 'pending' && <span className="text-cyan-200/50 text-[9px] uppercase font-bold tracking-wider text-right leading-tight">Same TX</span>}
                       {serviceFeeStatus.status === 'signing' && (
                         <span className="text-primary flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider">
                           <Loader2 className="h-3 w-3 animate-spin" /> Apprv
@@ -586,7 +586,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                   onClick={review ? handleSignAndBroadcast : handlePrepareReview}
                   className={`w-full py-4 rounded-xl font-black text-sm tracking-widest uppercase flex items-center justify-center gap-3 transition-all duration-300 relative overflow-hidden ${
                     isProcessing || recipients.length === 0
-                      ? 'bg-white/5 text-white/20 cursor-not-allowed border border-white/5'
+                      ? 'bg-white/5 text-cyan-200/50 cursor-not-allowed border border-white/5'
                       : 'bg-primary hover:bg-[#0cf2d5] text-[#02050a] glow-primary glow-primary-hover border border-transparent hover:scale-[1.02]'
                   }`}
                 >
@@ -602,8 +602,8 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                 </button>
 
                 {recipients.length > 0 && !isProcessing && (
-                  <p className="text-[10px] text-white/30 text-center mt-4 uppercase tracking-widest font-mono">
-                    All outputs signed in <span className="text-white/60 font-bold">one approval</span>
+                  <p className="text-[10px] text-cyan-200 text-center mt-4 uppercase tracking-widest font-mono">
+                    All outputs signed in <span className="text-cyan-100 font-bold">one approval</span>
                   </p>
                 )}
               </div>
@@ -631,7 +631,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                 </div>
                 <button
                   onClick={() => setIsWalletModalOpen(false)}
-                  className="rounded-lg p-2 text-white/40 hover:bg-white/10 hover:text-white transition-colors"
+                  className="rounded-lg p-2 text-cyan-200 hover:bg-white/10 hover:text-white transition-colors"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -676,7 +676,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                         </div>
                         <div>
                           <div className="text-sm font-bold text-white tracking-wide">{wallet.name}</div>
-                          <span className="text-[10px] text-white/40 uppercase tracking-widest font-mono mt-0.5 block">
+                          <span className="text-[10px] text-cyan-200 uppercase tracking-widest font-mono mt-0.5 block">
                             {wallet.type === 'extension'
                               ? (isInstalled ? 'BROWSER EXT' : 'NOT INSTALLED')
                               : `APP`}

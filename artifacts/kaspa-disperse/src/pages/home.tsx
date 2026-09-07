@@ -2,6 +2,7 @@ import {
   ArrowRight,
   Building2,
   Coins,
+  Gift,
   Lock,
   PieChart,
   Rocket,
@@ -79,7 +80,7 @@ export default function Home() {
           </p>
           <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
             <CtaButton large />
-            <a href="#how-it-works" className="text-sm text-white/45 hover:text-white transition">
+            <a href="#how-it-works" className="text-sm text-cyan-200 hover:text-white transition">
               See how it works →
             </a>
           </div>
@@ -89,7 +90,7 @@ export default function Home() {
           <div className="max-w-6xl mx-auto px-4 sm:px-6">
             <div className="text-center mb-14">
               <h2 className="text-2xl sm:text-3xl font-bold text-white">How It Works</h2>
-              <p className="mt-3 text-zinc-500">From one wallet to many in a few simple steps.</p>
+              <p className="mt-3 text-cyan-200">From one wallet to many in a few simple steps.</p>
             </div>
             <div className="flex flex-wrap justify-center gap-6">
               {STEPS.map((step) => (
@@ -99,7 +100,7 @@ export default function Home() {
                 >
                   <span className="text-cyan-500 font-mono text-sm font-bold">{step.num}</span>
                   <h3 className="text-lg font-semibold text-white mt-2 mb-2">{step.title}</h3>
-                  <p className="text-sm text-zinc-500 leading-relaxed">{step.body}</p>
+                  <p className="text-sm text-cyan-200 leading-relaxed">{step.body}</p>
                 </div>
               ))}
             </div>
@@ -110,7 +111,7 @@ export default function Home() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <div className="text-center mb-8">
               <h2 className="text-2xl sm:text-3xl font-bold text-white">Distro</h2>
-              <p className="mt-3 text-zinc-500 max-w-xl mx-auto">
+              <p className="mt-3 text-cyan-200 max-w-xl mx-auto">
                 Load your list, set rewards, and send KAS — right here.
               </p>
             </div>
@@ -124,7 +125,7 @@ export default function Home() {
           <div className="max-w-6xl mx-auto px-4 sm:px-6">
             <div className="max-w-2xl mb-12">
               <h2 className="text-2xl sm:text-3xl font-bold text-white">Built for Community Rewards</h2>
-              <p className="mt-4 text-zinc-400 leading-relaxed">
+              <p className="mt-4 text-cyan-200 leading-relaxed">
                 Stop manually sending KAS one wallet at a time. Prepare a list of recipient wallets,
                 assign amounts, review the distribution, and send your rewards from one place.
               </p>
@@ -138,14 +139,14 @@ export default function Home() {
                 <div key={title} className="kd-glass-strong rounded-2xl p-6">
                   <Icon className="h-8 w-8 text-cyan-400 mb-4" />
                   <h3 className="font-semibold text-white mb-2">{title}</h3>
-                  <p className="text-sm text-zinc-500 leading-relaxed">{body}</p>
+                  <p className="text-sm text-cyan-200 leading-relaxed">{body}</p>
                 </div>
               ))}
             </div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-4">Use it for</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-cyan-200 mb-4">Use it for</p>
             <div className="flex flex-wrap gap-2">
               {USE_CASES.map((item) => (
-                <span key={item} className="kd-glass px-4 py-2 rounded-full text-sm text-zinc-300">
+                <span key={item} className="kd-glass px-4 py-2 rounded-full text-sm text-cyan-100">
                   {item}
                 </span>
               ))}
@@ -157,7 +158,7 @@ export default function Home() {
           <div className="max-w-6xl mx-auto px-4 sm:px-6">
             <div className="text-center mb-14">
               <h2 className="text-2xl sm:text-3xl font-bold text-white">Simple, Transparent Fees</h2>
-              <p className="mt-3 text-zinc-500 max-w-xl mx-auto">
+              <p className="mt-3 text-cyan-200 max-w-xl mx-auto">
                 No guessing what your drop will cost. See exactly what you&apos;re sending and paying before you confirm.
               </p>
             </div>
@@ -170,15 +171,15 @@ export default function Home() {
                   { label: 'Service Fee', desc: `${SERVICE_FEE_KAS} KAS flat per drop` },
                 ].map((row) => (
                   <div key={row.label} className="flex justify-between gap-4 text-sm border-b border-cyan-900/10 pb-3">
-                    <span className="text-zinc-300">{row.label}</span>
-                    <span className="text-zinc-500 text-right">{row.desc}</span>
+                    <span className="text-cyan-100">{row.label}</span>
+                    <span className="text-cyan-200 text-right">{row.desc}</span>
                   </div>
                 ))}
                 <div className="kd-glass rounded-xl p-4 flex justify-between border-cyan-500/20">
                   <span className="font-semibold text-cyan-300">Total</span>
                   <span className="text-white text-sm">Distribution + all fees</span>
                 </div>
-                <p className="text-xs text-zinc-500">No hidden charges.</p>
+                <p className="text-xs text-cyan-200">No hidden charges.</p>
               </div>
             </div>
             <div className="grid sm:grid-cols-4 gap-4 mt-12 max-w-4xl mx-auto">
@@ -190,7 +191,7 @@ export default function Home() {
               ].map(({ icon: Icon, title }) => (
                 <div key={title} className="text-center">
                   <Icon className="h-5 w-5 text-cyan-400 mx-auto mb-2" />
-                  <div className="text-sm font-medium text-zinc-300">{title}</div>
+                  <div className="text-sm font-medium text-cyan-100">{title}</div>
                 </div>
               ))}
             </div>
@@ -201,7 +202,7 @@ export default function Home() {
           <div className="max-w-6xl mx-auto px-4 sm:px-6">
             <div className="text-center mb-14">
               <h2 className="text-2xl sm:text-3xl font-bold text-white">Token Distribution</h2>
-              <p className="mt-3 text-zinc-500 max-w-xl mx-auto">
+              <p className="mt-3 text-cyan-200 max-w-xl mx-auto">
                 A clear split: burn, dev, team, marketing, and community.
               </p>
             </div>
@@ -211,11 +212,28 @@ export default function Home() {
           </div>
         </section>
 
+        <section id="holder-rewards" className="border-t border-cyan-900/20 py-20 sm:py-24">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6">
+            <div className="max-w-2xl mx-auto kd-glass-strong rounded-2xl p-8 sm:p-10 text-center">
+              <div className="h-12 w-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center mx-auto mb-5">
+                <Gift className="h-6 w-6 text-cyan-400" />
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-white">Holder Rewards</h2>
+              <p className="mt-4 text-lg text-cyan-200 leading-relaxed">
+                Platform Fees &amp; Trade Fees are distributed back to eligible holders weekly.
+              </p>
+              <p className="mt-4 text-cyan-200 leading-relaxed">
+                Every transaction helps generate rewards for the KASDISTRO community.
+              </p>
+            </div>
+          </div>
+        </section>
+
         <section className="border-t border-cyan-900/20 py-20 sm:py-24">
           <div className="max-w-6xl mx-auto px-4 sm:px-6">
             <div className="text-center mb-12">
               <h2 className="text-2xl sm:text-3xl font-bold text-white">Made for More Than Token Projects</h2>
-              <p className="mt-3 text-zinc-500 max-w-2xl mx-auto">
+              <p className="mt-3 text-cyan-200 max-w-2xl mx-auto">
                 If you have a Kaspa community and want to reward people in KAS, this tool was built for you.
               </p>
             </div>
@@ -227,7 +245,7 @@ export default function Home() {
                   </div>
                   <div>
                     <h3 className="font-semibold text-white mb-1">{title}</h3>
-                    <p className="text-sm text-zinc-500 leading-relaxed">{body}</p>
+                    <p className="text-sm text-cyan-200 leading-relaxed">{body}</p>
                   </div>
                 </div>
               ))}
@@ -240,8 +258,8 @@ export default function Home() {
             <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">
               Your KAS. Your Community. Your Drop.
             </h2>
-            <p className="text-zinc-400 mb-2">You decide who receives KAS and how much.</p>
-            <p className="text-zinc-300 font-medium mb-10">Bulk distribution made simple.</p>
+            <p className="text-cyan-200 mb-2">You decide who receives KAS and how much.</p>
+            <p className="text-cyan-100 font-medium mb-10">Bulk distribution made simple.</p>
             <a
               href="#distro"
               className="kd-btn inline-flex items-center gap-2 text-black font-bold px-10 py-4 rounded-xl uppercase tracking-wide text-sm"

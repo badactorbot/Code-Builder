@@ -7,6 +7,7 @@ const LINKS = [
   { label: 'Features', href: '/#features' },
   { label: 'Fees', href: '/#fees' },
   { label: 'Token Distribution', href: '/#token-distribution' },
+  { label: 'Holder Rewards', href: '/#holder-rewards' },
 ];
 
 const SOCIALS = [
@@ -50,7 +51,7 @@ function SocialLinks({
           rel="noopener noreferrer"
           aria-label={social.label}
           title={social.label}
-          className={`inline-flex ${hit} items-center justify-center rounded-xl text-zinc-400 transition hover:bg-white/5 hover:text-white`}
+          className={`inline-flex ${hit} items-center justify-center rounded-xl text-cyan-200 transition hover:bg-white/5 hover:text-white`}
         >
           <span className={iconBox}>{social.icon}</span>
         </a>
@@ -70,7 +71,7 @@ export function LandingLayout({ children }: { children: ReactNode }) {
                 <a
                   key={link.href}
                   href={link.href}
-                  className="text-lg font-medium text-zinc-300 hover:text-white transition"
+                  className="text-lg font-medium text-cyan-200 hover:text-white transition"
                 >
                   {link.label}
                 </a>
@@ -92,11 +93,12 @@ export function LandingLayout({ children }: { children: ReactNode }) {
 
         <footer className="border-t border-cyan-900/20 bg-[#070b10]/55 backdrop-blur-xl">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="text-sm text-zinc-500">KASDISTRO</div>
-            <div className="flex items-center gap-6 text-xs text-zinc-500">
-              <a href="/#how-it-works" className="hover:text-zinc-300">How It Works</a>
-              <a href="/#distro" className="hover:text-cyan-400">Distro</a>
-              <a href="/#token-distribution" className="hover:text-zinc-300">Token Distribution</a>
+            <div className="text-sm text-cyan-200">KASDISTRO</div>
+            <div className="flex items-center gap-6 text-xs text-cyan-200">
+              <a href="/#how-it-works" className="hover:text-cyan-100">How It Works</a>
+              <a href="/#distro" className="hover:text-cyan-100">Distro</a>
+              <a href="/#token-distribution" className="hover:text-cyan-100">Token Distribution</a>
+              <a href="/#holder-rewards" className="hover:text-cyan-100">Holder Rewards</a>
             </div>
             <SocialLinks />
           </div>
