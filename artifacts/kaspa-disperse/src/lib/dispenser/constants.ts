@@ -2,6 +2,9 @@ export const SERVICE_FEE_KAS = 100;
 export const SERVICE_FEE_ADDRESS =
   'kaspa:qz6dltvkds80wf8raac504ze4nesgnk72n24jr7krum2m8dq34khvkevr88cc';
 
+export const KRON_CHART_URL =
+  'https://kron.technology/token/bed3c81787e07988c6d5792fb02324bfd11b980a123f87a28eb177eeec6084a0';
+
 export const TOKEN_DISTRIBUTION = [
   {
     label: 'Burn',

@@ -7,6 +7,7 @@ const LINKS = [
   { label: 'Features', href: '/#features' },
   { label: 'Fees', href: '/#fees' },
   { label: 'Token Distribution', href: '/#token-distribution' },
+  { label: 'Chart', href: '/#chart' },
   { label: 'Holder Rewards', href: '/#holder-rewards' },
 ];
 
@@ -98,6 +99,7 @@ export function LandingLayout({ children }: { children: ReactNode }) {
               <a href="/#how-it-works" className="hover:text-cyan-100">How It Works</a>
               <a href="/#distro" className="hover:text-cyan-100">Distro</a>
               <a href="/#token-distribution" className="hover:text-cyan-100">Token Distribution</a>
+              <a href="/#chart" className="hover:text-cyan-100">Chart</a>
               <a href="/#holder-rewards" className="hover:text-cyan-100">Holder Rewards</a>
             </div>
             <SocialLinks />

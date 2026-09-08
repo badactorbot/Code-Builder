@@ -11,12 +11,13 @@ import {
   Upload,
   Users,
   Zap,
+  ExternalLink,
 } from 'lucide-react';
 import { LandingLayout } from '@/components/dispenser/landing-layout';
 import { DispenserLogo } from '@/components/dispenser/brand-logo';
 import { TokenDistributionChart } from '@/components/dispenser/token-distribution-chart';
 import DistroApp from '@/pages/distro-app';
-import { SERVICE_FEE_KAS } from '@/lib/dispenser/constants';
+import { KRON_CHART_URL, SERVICE_FEE_KAS } from '@/lib/dispenser/constants';
 
 const USE_CASES = [
   'Community Rewards',
@@ -208,6 +209,25 @@ export default function Home() {
             </div>
             <div className="max-w-3xl mx-auto kd-glass-strong rounded-2xl p-8">
               <TokenDistributionChart />
+            </div>
+          </div>
+        </section>
+
+        <section id="chart" className="border-t border-cyan-900/20 py-20 sm:py-24">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6">
+            <div className="max-w-3xl mx-auto kd-glass-strong rounded-2xl p-8 sm:p-10 text-center">
+              <h2 className="text-2xl sm:text-3xl font-bold text-white">Chart</h2>
+              <p className="mt-4 text-lg text-cyan-200 leading-relaxed">
+                Live KASDISTRO market data on KRON.
+              </p>
+              <a
+                href={KRON_CHART_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="kd-btn mt-8 inline-flex items-center justify-center gap-2 text-black font-bold rounded-xl uppercase tracking-wide px-8 py-3 text-sm"
+              >
+                Open Chart on KRON <ExternalLink className="h-4 w-4" />
+              </a>
             </div>
           </div>
         </section>
