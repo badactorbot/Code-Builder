@@ -4,6 +4,8 @@ export const SERVICE_FEE_ADDRESS =
 
 export const KRON_CHART_URL =
   'https://kron.technology/token/bed3c81787e07988c6d5792fb02324bfd11b980a123f87a28eb177eeec6084a0';
+export const KRON_TOKEN_TICK = 'KDIST';
+export const KRON_IDX_URL = 'https://idx.kron.technology';
 
 export const TOKEN_DISTRIBUTION = [
   {
