@@ -77,7 +77,7 @@ export function LandingLayout({ children }: { children: ReactNode }) {
                 rel="noopener noreferrer"
                 className="kd-btn inline-flex items-center gap-2 text-black font-semibold text-base px-6 py-3 rounded-xl"
               >
-                Buy
+                BUY KDIST
               </a>
             </div>
           </div>

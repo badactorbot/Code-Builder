@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { ExternalLink, Loader2 } from 'lucide-react';
 import {
   KRON_CHART_URL,
@@ -7,10 +7,12 @@ import {
 } from '@/lib/dispenser/constants';
 
 const INTERVALS = [
-  { id: '15m', label: '15m' },
-  { id: '1h', label: '1H' },
-  { id: '4h', label: '4H' },
-  { id: '1d', label: '1D' },
+  { id: '1m', label: '1m', seconds: 60 },
+  { id: '5m', label: '5m', seconds: 300 },
+  { id: '15m', label: '15m', seconds: 900 },
+  { id: '1h', label: '1H', seconds: 3600 },
+  { id: '4h', label: '4H', seconds: 14_400 },
+  { id: '1d', label: '1D', seconds: 86_400 },
 ] as const;
 
 type KronInterval = (typeof INTERVALS)[number]['id'];
@@ -21,6 +23,14 @@ interface OhlcPoint {
   high: number;
   close: number;
   low: number;
+  volume: number;
+}
+
+interface KronTrade {
+  txid?: string;
+  ts: number;
+  side?: string;
+  price: number;
   volume: number;
 }
 
@@ -68,6 +78,35 @@ function yTicks(min: number, max: number, count = 5) {
   const span = max - min || 1;
   const step = span / (count - 1);
   return Array.from({ length: count }, (_, i) => min + step * i);
+}
+
+function candlesFromTrades(trades: KronTrade[], seconds: number): OhlcPoint[] {
+  const sorted = [...trades]
+    .filter((trade) => Number.isFinite(trade.ts) && Number.isFinite(trade.price))
+    .sort((a, b) => a.ts - b.ts);
+  const buckets = new Map<number, OhlcPoint>();
+
+  for (const trade of sorted) {
+    const time = Math.floor(trade.ts / seconds) * seconds;
+    const existing = buckets.get(time);
+    if (!existing) {
+      buckets.set(time, {
+        time,
+        open: trade.price,
+        high: trade.price,
+        low: trade.price,
+        close: trade.price,
+        volume: Number.isFinite(trade.volume) ? trade.volume : 0,
+      });
+      continue;
+    }
+    existing.high = Math.max(existing.high, trade.price);
+    existing.low = Math.min(existing.low, trade.price);
+    existing.close = trade.price;
+    existing.volume += Number.isFinite(trade.volume) ? trade.volume : 0;
+  }
+
+  return [...buckets.values()];
 }
 
 function CandlestickChart({
@@ -232,10 +271,11 @@ function CandlestickChart({
 }
 
 export function KronPriceChart() {
-  const [interval, setInterval] = useState<KronInterval>('1h');
-  const [points, setPoints] = useState<OhlcPoint[]>([]);
+  const [timeframe, setTimeframe] = useState<KronInterval>('15m');
+  const [trades, setTrades] = useState<KronTrade[]>([]);
   const [meta, setMeta] = useState<TokenMeta | null>(null);
   const [loading, setLoading] = useState(true);
+  const [live, setLive] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -247,44 +287,98 @@ export function KronPriceChart() {
         setError('');
       }
       try {
-        const [ohlcBody, metaBody] = await Promise.all([
-          fetchJson<{ result?: OhlcPoint[] }>(
-            `${KRON_IDX_URL}/v1/kcc20/token/${encodeURIComponent(KRON_TOKEN_TICK)}/ohlc?interval=${interval}`,
+        const [tradesBody, metaBody] = await Promise.all([
+          fetchJson<{ result?: KronTrade[] }>(
+            `${KRON_IDX_URL}/v1/kcc20/token/${encodeURIComponent(KRON_TOKEN_TICK)}/trades?limit=1000`,
           ),
           fetchJson<{ result?: TokenMeta[] }>(
             `${KRON_IDX_URL}/v1/kcc20/token/${encodeURIComponent(KRON_TOKEN_TICK)}`,
           ),
         ]);
         if (cancelled) return;
-        const candles = Array.isArray(ohlcBody.result) ? ohlcBody.result : [];
+        const nextTrades = Array.isArray(tradesBody.result) ? tradesBody.result : [];
         const token = Array.isArray(metaBody.result) ? metaBody.result[0] ?? null : null;
-        setPoints(candles);
+        setTrades(nextTrades);
         setMeta(token);
-        setError(candles.length === 0 ? 'No KRON chart data yet.' : '');
+        setError(nextTrades.length === 0 ? 'No KRON trades yet.' : '');
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : 'Could not load KRON chart.');
-        if (!quiet) setPoints([]);
+        if (!quiet) setTrades([]);
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
     void load();
-    const timer = window.setInterval(() => { void load(true); }, 30_000);
+
+    const poll = window.setInterval(() => {
+      void load(true);
+    }, 15_000);
+
+    const stream = new EventSource(
+      `${KRON_IDX_URL}/v1/kcc20/stream?tick=${encodeURIComponent(KRON_TOKEN_TICK)}`,
+    );
+    stream.addEventListener('ready', () => {
+      if (!cancelled) setLive(true);
+    });
+    stream.addEventListener('update', (event) => {
+      if (cancelled) return;
+      setLive(true);
+      try {
+        const payload = JSON.parse((event as MessageEvent).data) as {
+          price?: number;
+          change24h?: number;
+          volume24h?: number;
+        };
+        if (typeof payload.price === 'number') {
+          setMeta((current) =>
+            current
+              ? {
+                  ...current,
+                  price: payload.price ?? current.price,
+                  change24h: payload.change24h ?? current.change24h,
+                  volume24h: payload.volume24h ?? current.volume24h,
+                }
+              : current,
+          );
+        }
+      } catch {
+        /* payload shapes vary; refetch covers the chart */
+      }
+      void load(true);
+    });
+    stream.onerror = () => {
+      if (!cancelled) setLive(false);
+    };
+
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearInterval(poll);
+      stream.close();
     };
-  }, [interval]);
+  }, []);
 
+  const seconds = INTERVALS.find((item) => item.id === timeframe)?.seconds ?? 900;
+  const points = useMemo(() => candlesFromTrades(trades, seconds), [trades, seconds]);
   const up = (meta?.change24h ?? 0) >= 0;
 
   return (
     <div className="kd-glass-strong rounded-2xl overflow-hidden">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 px-5 py-5 border-b border-cyan-900/20">
         <div>
-          <div className="text-xs uppercase tracking-wider text-cyan-400">KRON</div>
+          <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-cyan-400">
+            KRON
+            <span
+              className={`normal-case tracking-normal rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                live
+                  ? 'bg-emerald-500/15 text-emerald-300'
+                  : 'bg-zinc-500/15 text-zinc-400'
+              }`}
+            >
+              {live ? 'Live' : 'Polling'}
+            </span>
+          </div>
           <div className="mt-1 flex items-baseline gap-3">
             <h2 className="text-2xl font-bold text-white">
               {meta?.tick ?? KRON_TOKEN_TICK}
@@ -306,9 +400,9 @@ export function KronPriceChart() {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setInterval(item.id)}
+                onClick={() => setTimeframe(item.id)}
                 className={`px-3 py-1.5 text-xs font-medium transition ${
-                  interval === item.id
+                  timeframe === item.id
                     ? 'bg-cyan-500/20 text-cyan-200'
                     : 'text-zinc-400 hover:text-white hover:bg-white/5'
                 }`}
@@ -346,7 +440,7 @@ export function KronPriceChart() {
             </a>
           </div>
         ) : (
-          <CandlestickChart data={points} interval={interval} />
+          <CandlestickChart data={points} interval={timeframe} />
         )}
       </div>
     </div>
