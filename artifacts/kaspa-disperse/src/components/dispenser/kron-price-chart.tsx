@@ -1,12 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { ExternalLink, Loader2 } from 'lucide-react';
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from '@/components/ui/chart';
 import {
   KRON_CHART_URL,
   KRON_IDX_URL,
@@ -39,12 +32,10 @@ interface TokenMeta {
   volume24h: number;
 }
 
-const chartConfig = {
-  close: {
-    label: 'Price (KAS)',
-    color: '#22d3ee',
-  },
-} satisfies ChartConfig;
+const UP = '#34d399';
+const DOWN = '#f87171';
+const CHART_H = 280;
+const PAD = { top: 12, right: 12, bottom: 28, left: 72 };
 
 function formatKas(value: number) {
   return value.toLocaleString(undefined, { maximumFractionDigits: 6 });
@@ -71,6 +62,173 @@ async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!response.ok) throw new Error(`KRON returned ${response.status}`);
   return response.json() as Promise<T>;
+}
+
+function yTicks(min: number, max: number, count = 5) {
+  const span = max - min || 1;
+  const step = span / (count - 1);
+  return Array.from({ length: count }, (_, i) => min + step * i);
+}
+
+function CandlestickChart({
+  data,
+  interval,
+}: {
+  data: OhlcPoint[];
+  interval: KronInterval;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  const [hover, setHover] = useState<number | null>(null);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const next = Math.floor(entries[0]?.contentRect.width ?? 0);
+      if (next > 0) setWidth(next);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const lows = data.map((d) => d.low);
+  const highs = data.map((d) => d.high);
+  const min = Math.min(...lows);
+  const max = Math.max(...highs);
+  const pad = (max - min || 1) * 0.08;
+  const yMin = min - pad;
+  const yMax = max + pad;
+  const innerW = Math.max(1, width - PAD.left - PAD.right);
+  const innerH = CHART_H - PAD.top - PAD.bottom;
+  const slot = innerW / Math.max(data.length, 1);
+  const candleW = Math.max(3, Math.min(14, slot * 0.62));
+
+  const yScale = (value: number) =>
+    PAD.top + ((yMax - value) / (yMax - yMin || 1)) * innerH;
+
+  const ticks = yTicks(yMin, yMax);
+
+  const onMove = (event: MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left - PAD.left;
+    const index = Math.min(data.length - 1, Math.max(0, Math.floor(x / slot)));
+    setHover(index);
+  };
+
+  const active = hover != null ? data[hover] : null;
+
+  return (
+    <div ref={wrapRef} className="relative w-full">
+      {width > 0 && (
+        <svg
+          width={width}
+          height={CHART_H}
+          viewBox={`0 0 ${width} ${CHART_H}`}
+          className="overflow-visible"
+          onMouseMove={onMove}
+          onMouseLeave={() => setHover(null)}
+        >
+          {ticks.map((tick) => {
+            const y = yScale(tick);
+            return (
+              <g key={tick}>
+                <line
+                  x1={PAD.left}
+                  x2={width - PAD.right}
+                  y1={y}
+                  y2={y}
+                  stroke="#164e63"
+                  strokeDasharray="3 3"
+                />
+                <text
+                  x={PAD.left - 8}
+                  y={y + 4}
+                  textAnchor="end"
+                  fill="#67e8f9"
+                  fontSize="11"
+                >
+                  {formatKas(tick)}
+                </text>
+              </g>
+            );
+          })}
+
+          {data.map((candle, i) => {
+            const cx = PAD.left + slot * i + slot / 2;
+            const up = candle.close >= candle.open;
+            const color = up ? UP : DOWN;
+            const bodyTop = yScale(Math.max(candle.open, candle.close));
+            const bodyBot = yScale(Math.min(candle.open, candle.close));
+            const bodyH = Math.max(1.5, bodyBot - bodyTop);
+            const wickTop = yScale(candle.high);
+            const wickBot = yScale(candle.low);
+            const highlighted = hover === i;
+
+            return (
+              <g key={candle.time} opacity={hover == null || highlighted ? 1 : 0.45}>
+                <line
+                  x1={cx}
+                  x2={cx}
+                  y1={wickTop}
+                  y2={wickBot}
+                  stroke={color}
+                  strokeWidth={highlighted ? 1.75 : 1.25}
+                />
+                <rect
+                  x={cx - candleW / 2}
+                  y={bodyTop}
+                  width={candleW}
+                  height={bodyH}
+                  fill={color}
+                  rx={1}
+                />
+              </g>
+            );
+          })}
+
+          {data.map((candle, i) => {
+            if (interval === '1d') {
+              if (i !== 0 && i !== data.length - 1) return null;
+            } else if (i !== 0 && i !== data.length - 1 && i % Math.ceil(data.length / 5) !== 0) {
+              return null;
+            }
+            const cx = PAD.left + slot * i + slot / 2;
+            return (
+              <text
+                key={`label-${candle.time}`}
+                x={cx}
+                y={CHART_H - 8}
+                textAnchor="middle"
+                fill="#67e8f9"
+                fontSize="11"
+              >
+                {formatTime(candle.time, interval)}
+              </text>
+            );
+          })}
+        </svg>
+      )}
+
+      {active && (
+        <div className="pointer-events-none absolute left-20 top-3 rounded-lg border border-cyan-900/40 bg-[#070b10]/95 px-3 py-2 text-xs text-zinc-200 shadow-xl">
+          <div className="font-medium text-cyan-200">{formatTooltipTime(active.time)}</div>
+          <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 tabular-nums">
+            <span className="text-zinc-500">Open</span>
+            <span>{formatKas(active.open)}</span>
+            <span className="text-zinc-500">High</span>
+            <span>{formatKas(active.high)}</span>
+            <span className="text-zinc-500">Low</span>
+            <span>{formatKas(active.low)}</span>
+            <span className="text-zinc-500">Close</span>
+            <span className={active.close >= active.open ? 'text-emerald-400' : 'text-red-400'}>
+              {formatKas(active.close)}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function KronPriceChart() {
@@ -121,7 +279,6 @@ export function KronPriceChart() {
   }, [interval]);
 
   const up = (meta?.change24h ?? 0) >= 0;
-  const data = points.map((point) => ({ ...point, label: formatTime(point.time, interval) }));
 
   return (
     <div className="kd-glass-strong rounded-2xl overflow-hidden">
@@ -189,52 +346,7 @@ export function KronPriceChart() {
             </a>
           </div>
         ) : (
-          <ChartContainer config={chartConfig} className="h-[280px] w-full aspect-auto">
-            <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="kronPriceFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#22d3ee" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#164e63" vertical={false} />
-              <XAxis
-                dataKey="label"
-                tickLine={false}
-                axisLine={false}
-                tick={{ fill: '#67e8f9', fontSize: 11 }}
-                minTickGap={24}
-              />
-              <YAxis
-                dataKey="close"
-                domain={['auto', 'auto']}
-                tickLine={false}
-                axisLine={false}
-                width={72}
-                tick={{ fill: '#67e8f9', fontSize: 11 }}
-                tickFormatter={(value: number) => formatKas(value)}
-              />
-              <ChartTooltip
-                content={
-                  <ChartTooltipContent
-                    labelFormatter={(_, payload) => {
-                      const time = payload?.[0]?.payload?.time;
-                      return typeof time === 'number' ? formatTooltipTime(time) : '';
-                    }}
-                    formatter={(value) => [`${formatKas(Number(value))} KAS`, 'Price']}
-                  />
-                }
-              />
-              <Area
-                type="monotone"
-                dataKey="close"
-                stroke="#22d3ee"
-                strokeWidth={2}
-                fill="url(#kronPriceFill)"
-                isAnimationActive={false}
-              />
-            </AreaChart>
-          </ChartContainer>
+          <CandlestickChart data={points} interval={interval} />
         )}
       </div>
     </div>

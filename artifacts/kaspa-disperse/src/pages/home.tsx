@@ -3,8 +3,6 @@ import {
   Building2,
   Coins,
   Gift,
-  Lock,
-  PieChart,
   Rocket,
   Shield,
   Sparkles,
@@ -17,7 +15,6 @@ import { DispenserLogo } from '@/components/dispenser/brand-logo';
 import { TokenDistributionChart } from '@/components/dispenser/token-distribution-chart';
 import { KronPriceChart } from '@/components/dispenser/kron-price-chart';
 import DistroApp from '@/pages/distro-app';
-import { SERVICE_FEE_KAS } from '@/lib/dispenser/constants';
 
 const USE_CASES = [
   'Community Rewards',
@@ -150,50 +147,6 @@ export default function Home() {
                 <span key={item} className="kd-glass px-4 py-2 rounded-full text-sm text-cyan-100">
                   {item}
                 </span>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section id="fees" className="border-t border-cyan-900/20 py-20 sm:py-24">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6">
-            <div className="text-center mb-14">
-              <h2 className="text-2xl sm:text-3xl font-bold text-white">Simple, Transparent Fees</h2>
-              <p className="mt-3 text-cyan-200 max-w-xl mx-auto">
-                No guessing what your drop will cost. See exactly what you&apos;re sending and paying before you confirm.
-              </p>
-            </div>
-            <div className="max-w-lg mx-auto">
-              <div className="kd-glass-strong rounded-2xl p-8 space-y-4">
-                <h3 className="font-semibold text-white">Before you confirm</h3>
-                {[
-                  { label: 'KAS Distributed', desc: 'Total sent to your recipients' },
-                  { label: 'Kaspa Network Fee', desc: 'Blockchain cost per transfer' },
-                  { label: 'Service Fee', desc: `${SERVICE_FEE_KAS} KAS flat per drop` },
-                ].map((row) => (
-                  <div key={row.label} className="flex justify-between gap-4 text-sm border-b border-cyan-900/10 pb-3">
-                    <span className="text-cyan-100">{row.label}</span>
-                    <span className="text-cyan-200 text-right">{row.desc}</span>
-                  </div>
-                ))}
-                <div className="kd-glass rounded-xl p-4 flex justify-between border-cyan-500/20">
-                  <span className="font-semibold text-cyan-300">Total</span>
-                  <span className="text-white text-sm">Distribution + all fees</span>
-                </div>
-                <p className="text-xs text-cyan-200">No hidden charges.</p>
-              </div>
-            </div>
-            <div className="grid sm:grid-cols-4 gap-4 mt-12 max-w-4xl mx-auto">
-              {[
-                { icon: Shield, title: 'Transparent' },
-                { icon: PieChart, title: 'Predictable' },
-                { icon: Users, title: 'Community First' },
-                { icon: Lock, title: 'Secure' },
-              ].map(({ icon: Icon, title }) => (
-                <div key={title} className="text-center">
-                  <Icon className="h-5 w-5 text-cyan-400 mx-auto mb-2" />
-                  <div className="text-sm font-medium text-cyan-100">{title}</div>
-                </div>
               ))}
             </div>
           </div>
