@@ -39,10 +39,8 @@ function NavAnchor({
 
 const LINKS = [
   { label: 'How It Works', href: '/#how-it-works' },
-  { label: 'Distro', href: '/#distro' },
   { label: 'Features', href: '/#features' },
   { label: 'Token Distribution', href: '/#token-distribution' },
-  { label: 'Chart', href: '/#chart' },
   { label: 'Holder Rewards', href: '/#holder-rewards' },
   { label: 'Kaspaper', href: '/kaspaper' },
 ];
@@ -107,11 +105,17 @@ export function LandingLayout({ children }: { children: ReactNode }) {
             </nav>
             <div className="ml-auto flex items-center gap-3">
               <SocialLinks size="lg" />
+              <NavAnchor
+                href="/#distro"
+                className="kd-btn inline-flex items-center gap-2 text-black font-bold text-sm sm:text-base px-5 sm:px-6 py-3 rounded-xl uppercase tracking-wide shadow-[0_0_28px_rgba(34,211,238,0.55)]"
+              >
+                Use Kasdistro
+              </NavAnchor>
               <a
                 href={KRON_CHART_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="kd-btn inline-flex items-center gap-2 text-black font-semibold text-base px-6 py-3 rounded-xl"
+                className="hidden sm:inline-flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-5 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/70 hover:bg-cyan-500/20 hover:text-white"
               >
                 BUY KDIST
               </a>
@@ -126,9 +130,8 @@ export function LandingLayout({ children }: { children: ReactNode }) {
             <div className="text-sm text-cyan-200">KASDISTRO</div>
             <div className="flex items-center gap-6 text-xs text-cyan-200">
               <NavAnchor href="/#how-it-works" className="hover:text-cyan-100">How It Works</NavAnchor>
-              <NavAnchor href="/#distro" className="hover:text-cyan-100">Distro</NavAnchor>
+              <NavAnchor href="/#distro" className="hover:text-cyan-100">Use Kasdistro</NavAnchor>
               <NavAnchor href="/#token-distribution" className="hover:text-cyan-100">Token Distribution</NavAnchor>
-              <NavAnchor href="/#chart" className="hover:text-cyan-100">Chart</NavAnchor>
               <NavAnchor href="/#holder-rewards" className="hover:text-cyan-100">Holder Rewards</NavAnchor>
               <NavAnchor href="/kaspaper" className="hover:text-cyan-100">Kaspaper</NavAnchor>
             </div>

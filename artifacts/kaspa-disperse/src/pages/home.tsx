@@ -13,7 +13,6 @@ import {
 import { LandingLayout } from '@/components/dispenser/landing-layout';
 import { DispenserLogo } from '@/components/dispenser/brand-logo';
 import { TokenDistributionChart } from '@/components/dispenser/token-distribution-chart';
-import { KronPriceChart } from '@/components/dispenser/kron-price-chart';
 import DistroApp from '@/pages/distro-app';
 
 const USE_CASES = [
@@ -163,18 +162,6 @@ export default function Home() {
             <div className="max-w-3xl mx-auto kd-glass-strong rounded-2xl p-8">
               <TokenDistributionChart />
             </div>
-          </div>
-        </section>
-
-        <section id="chart" className="border-t border-cyan-900/20 py-20 sm:py-24">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6">
-            <div className="text-center mb-10">
-              <h2 className="text-2xl sm:text-3xl font-bold text-white">Chart</h2>
-              <p className="mt-3 text-cyan-200 max-w-xl mx-auto">
-                Live KASDISTRO price on KRON.
-              </p>
-            </div>
-            <KronPriceChart />
           </div>
         </section>
 
