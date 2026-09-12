@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Wallet, Upload, Send, CheckCircle2, AlertCircle, X,
-  ExternalLink, Loader2, FileText, Layers, Zap, Fingerprint
+  ExternalLink, Loader2, FileText, Layers, Zap, Fingerprint, Search
 } from 'lucide-react';
 import { kaspaApiBase } from '@/lib/dispenser/api';
 import { extractWalletAddresses, waitForWalletProvider } from '@/lib/dispenser/wallets';
@@ -55,6 +55,9 @@ const KASPA_WALLETS = [
 
 const SERVICE_FEE_KAS = 100;
 const SERVICE_FEE_ADDRESS = 'kaspa:qz6dltvkds80wf8raac504ze4nesgnk72n24jr7krum2m8dq34khvkevr88cc';
+const RECIPIENTS_PER_BATCH = 90;
+const NEXT_BATCH_RETRY_DELAY_MS = 2500;
+const NEXT_BATCH_MAX_RETRIES = 24;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Recipient {
@@ -84,17 +87,55 @@ interface TransactionReview {
   grandTotalSompi: string;
   mass: number;
   maximumMass: number;
+  inputOutpoints: Array<{ transactionId: string; index: number }>;
 }
 
-function GridBackground({ contained = false }: { contained?: boolean }) {
+interface BatchReview extends TransactionReview {
+  batchNumber: number;
+  batchCount: number;
+  recipientStart: number;
+  recipientCount: number;
+}
+
+interface HolderImportResult {
+  protocol: 'KRC-20' | 'KCC-20';
+  identifier: string;
+  addresses: string[];
+  imported: number;
+  hasMore: boolean;
+  totalHolders?: number | null;
+  validationStatus?: string | null;
+  sourceDaa?: string | null;
+  ticker?: string;
+  source?: string;
+  excludedCovenantHolders?: number;
+  excludedBurnAddresses?: number;
+}
+
+function errorMessage(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (
+    value
+    && typeof value === 'object'
+    && 'message' in value
+    && typeof value.message === 'string'
+    && value.message.trim()
+  ) {
+    return value.message;
+  }
+  return fallback;
+}
+
+function GridBackground() {
   return (
-    <div className={`${contained ? 'absolute' : 'fixed'} inset-0 z-0 pointer-events-none cyber-grid flex items-center justify-center`}>
+    <div className="absolute inset-0 z-0 pointer-events-none cyber-grid flex items-center justify-center">
       <div className="absolute top-[20%] left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-primary/10 rounded-[100%] blur-[120px] pointer-events-none mix-blend-screen"></div>
     </div>
   );
 }
 
-export default function DistroApp({ embedded = false }: { embedded?: boolean }) {
+// ── Component ─────────────────────────────────────────────────────────────────
+export default function DistroApp() {
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [account, setAccount] = useState<WalletAccount | null>(null);
   const [walletLoading, setWalletLoading] = useState<string | null>(null);
@@ -107,8 +148,13 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
   const [statuses, setStatuses] = useState<TransferStatus[]>([]);
   const [serviceFeeStatus, setServiceFeeStatus] = useState<TransferStatus>({ status: 'pending', txId: '' });
   const [isProcessing, setIsProcessing] = useState(false);
-  const [review, setReview] = useState<TransactionReview | null>(null);
+  const [review, setReview] = useState<BatchReview | null>(null);
   const [transactionError, setTransactionError] = useState('');
+  const [tokenIdentifier, setTokenIdentifier] = useState('');
+  const [kasPerHolder, setKasPerHolder] = useState('');
+  const [holderImportLoading, setHolderImportLoading] = useState(false);
+  const [holderImportError, setHolderImportError] = useState('');
+  const [holderImportResult, setHolderImportResult] = useState<HolderImportResult | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -122,15 +168,8 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
       setInstalledMap(map);
     };
     check();
-    const onReady = () => check();
-    const poll = window.setInterval(check, 400);
-    const stop = window.setTimeout(() => window.clearInterval(poll), 8000);
-    window.addEventListener('kasware#initialized', onReady);
-    return () => {
-      window.clearInterval(poll);
-      window.clearTimeout(stop);
-      window.removeEventListener('kasware#initialized', onReady);
-    };
+    const t = setTimeout(check, 600);
+    return () => clearTimeout(t);
   }, [isWalletModalOpen]);
 
   // ── Parse input ──────────────────────────────────────────────────────────
@@ -171,6 +210,46 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
     reader.readAsText(file);
   };
 
+  const handleImportTokenHolders = async () => {
+    const identifier = tokenIdentifier.trim();
+    const amount = Number(kasPerHolder);
+    setHolderImportError('');
+    setHolderImportResult(null);
+
+    if (!identifier) {
+      setHolderImportError('Enter a KRC-20 ticker or KCC-20 token ID.');
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setHolderImportError('Enter a valid KAS amount per holder.');
+      return;
+    }
+
+    setHolderImportLoading(true);
+    try {
+      const response = await fetch(
+        `${kaspaApiBase()}/api/kron/token-holders/${encodeURIComponent(identifier)}`,
+        { headers: { Accept: 'application/json' }, cache: 'no-store' },
+      );
+      const bodyText = await response.text();
+      let body: HolderImportResult & { error?: unknown };
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        throw new Error(`Holder service returned an invalid response (HTTP ${response.status}).`);
+      }
+      if (!response.ok) throw new Error(errorMessage(body.error, 'Could not load token holders.'));
+      if (!body.addresses?.length) throw new Error('No eligible Kaspa holder addresses were found.');
+
+      handleParseInput(body.addresses.map(address => `${address} ${kasPerHolder}`).join('\n'));
+      setHolderImportResult(body);
+    } catch (err: any) {
+      setHolderImportError(err?.message || 'Could not load token holders.');
+    } finally {
+      setHolderImportLoading(false);
+    }
+  };
+
   // ── Connect wallet ───────────────────────────────────────────────────────
   const handleConnectWallet = async (wallet: typeof KASPA_WALLETS[0]) => {
     setWalletError('');
@@ -205,7 +284,10 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
   };
 
   // ── Execute ──────────────────────────────────────────────────────────────
-  const buildDispersalReview = async () => {
+  const buildDispersalReview = async (
+    batchRecipients: Recipient[],
+    excludedOutpoints: Array<{ transactionId: string; index: number }> = [],
+  ) => {
     const apiBase = kaspaApiBase();
     const endpoint = `${apiBase}/api/kaspa/build-pskt`;
 
@@ -217,7 +299,11 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
         'Cache-Control': 'no-cache',
       },
       cache: 'no-store',
-      body: JSON.stringify({ senderAddress: account?.address, recipients }),
+      body: JSON.stringify({
+        senderAddress: account?.address,
+        recipients: batchRecipients,
+        excludedOutpoints,
+      }),
     });
 
     let response = await request();
@@ -264,7 +350,17 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
     setIsProcessing(true);
     setTransactionError('');
     try {
-      setReview(await buildDispersalReview());
+      const firstUnsent = statuses.findIndex(status => status.status !== 'sent');
+      const recipientStart = firstUnsent === -1 ? 0 : firstUnsent;
+      const batchRecipients = recipients.slice(recipientStart, recipientStart + RECIPIENTS_PER_BATCH);
+      const nextReview = await buildDispersalReview(batchRecipients);
+      setReview({
+        ...nextReview,
+        batchNumber: Math.floor(recipientStart / RECIPIENTS_PER_BATCH) + 1,
+        batchCount: Math.ceil(recipients.length / RECIPIENTS_PER_BATCH),
+        recipientStart,
+        recipientCount: batchRecipients.length,
+      });
     } catch (err: any) {
       setTransactionError(err?.message ?? 'Could not prepare transaction.');
     } finally {
@@ -276,29 +372,82 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
     if (!account || !review) return;
     setIsProcessing(true);
     setTransactionError('');
-    setStatuses(recipients.map(() => ({ status: 'signing', txId: '' })));
-    setServiceFeeStatus({ status: 'signing', txId: '' });
     try {
-      const signed = await account.provider.signPskt({
-        txJsonString: review.txJsonString,
-        options: {
-          signInputs: review.inputIndicesToSign.map(index => ({ index, sighashType: 1 })),
-        },
-      });
-      const signedJson = typeof signed === 'string' ? signed : signed?.txJsonString;
-      if (!signedJson) throw new Error('KasWare did not return a signed transaction.');
-      const pushed = await account.provider.pushTx(signedJson);
-      const txId = typeof pushed === 'string'
-        ? (() => { try { return JSON.parse(pushed)?.id ?? pushed; } catch { return pushed; } })()
-        : (pushed?.id ?? pushed?.txId ?? '');
-      setStatuses(recipients.map(() => ({ status: 'sent', txId })));
-      setServiceFeeStatus({ status: 'sent', txId });
+      let currentReview = review;
+      let recipientStart = review.recipientStart;
+      let lastTxId = '';
+      const excludedOutpoints = [...review.inputOutpoints];
+
+      while (recipientStart < recipients.length) {
+        const recipientCount = currentReview.recipientCount;
+        setReview(currentReview);
+        setStatuses(previous => previous.map((status, index) =>
+          index >= recipientStart && index < recipientStart + recipientCount
+            ? { status: 'signing', txId: '' }
+            : status,
+        ));
+        setServiceFeeStatus({ status: 'signing', txId: '' });
+
+        const signed = await account.provider.signPskt({
+          txJsonString: currentReview.txJsonString,
+          options: {
+            signInputs: currentReview.inputIndicesToSign.map(index => ({ index, sighashType: 1 })),
+          },
+        });
+        const signedJson = typeof signed === 'string' ? signed : signed?.txJsonString;
+        if (!signedJson) throw new Error('KasWare did not return a signed transaction.');
+        const pushed = await account.provider.pushTx(signedJson);
+        lastTxId = typeof pushed === 'string'
+          ? (() => { try { return JSON.parse(pushed)?.id ?? pushed; } catch { return pushed; } })()
+          : (pushed?.id ?? pushed?.txId ?? '');
+        setStatuses(previous => previous.map((status, index) =>
+          index >= recipientStart && index < recipientStart + recipientCount
+            ? { status: 'sent', txId: lastTxId }
+            : status,
+        ));
+
+        recipientStart += recipientCount;
+        if (recipientStart >= recipients.length) break;
+
+        const nextRecipients = recipients.slice(recipientStart, recipientStart + RECIPIENTS_PER_BATCH);
+        let nextReview: TransactionReview | null = null;
+        let lastError: any = null;
+        for (let attempt = 0; attempt < NEXT_BATCH_MAX_RETRIES; attempt += 1) {
+          await new Promise(resolve => window.setTimeout(resolve, NEXT_BATCH_RETRY_DELAY_MS));
+          try {
+            nextReview = await buildDispersalReview(nextRecipients, excludedOutpoints);
+            break;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+        if (!nextReview) {
+          throw new Error(
+            `Batch ${Math.floor(recipientStart / RECIPIENTS_PER_BATCH) + 1} could not be prepared after waiting for the previous transaction. ${lastError?.message ?? ''}`.trim(),
+          );
+        }
+        excludedOutpoints.push(...nextReview.inputOutpoints);
+        currentReview = {
+          ...nextReview,
+          batchNumber: Math.floor(recipientStart / RECIPIENTS_PER_BATCH) + 1,
+          batchCount: Math.ceil(recipients.length / RECIPIENTS_PER_BATCH),
+          recipientStart,
+          recipientCount: nextRecipients.length,
+        };
+      }
+
+      setServiceFeeStatus({ status: 'sent', txId: lastTxId });
       setReview(null);
     } catch (err: any) {
       const message = err?.message ?? 'Transaction was rejected.';
-      setStatuses(recipients.map(() => ({ status: 'failed', txId: '', error: message })));
+      setStatuses(previous => previous.map(status =>
+        status.status === 'signing'
+          ? { status: 'failed', txId: '', error: message }
+          : status,
+      ));
       setServiceFeeStatus({ status: 'failed', txId: '', error: message });
       setTransactionError(message);
+      setReview(null);
     } finally {
       setIsProcessing(false);
     }
@@ -315,7 +464,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
   // ── Render ───────────────────────────────────────────────────────────────
   const tool = (
     <div className="relative min-h-[min(92dvh,1100px)] overflow-hidden rounded-2xl bg-[#030914] flex flex-col z-10 selection:bg-primary/30 selection:text-white">
-      <GridBackground contained />
+      <GridBackground />
 
       {/* MAIN */}
       <main className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-10 grid lg:grid-cols-12 gap-8 flex-1 items-stretch">
@@ -330,17 +479,71 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
               <div className="flex items-center justify-between mb-6">
                 <label className="text-sm font-semibold tracking-wide text-white/90 flex items-center gap-2 uppercase">
                   <Fingerprint className="h-4 w-4 text-primary" />
-                   Max 100 Wallets per Mass
+                   90 Wallets per Mass-Safe Batch
                 </label>
                 <div>
                   <input type="file" accept=".csv,.txt" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-2 text-xs font-semibold bg-white/5 hover:bg-white/10 text-cyan-100 border border-white/10 px-4 py-2 rounded-lg transition-colors hover:border-white/20"
+                    className="flex items-center gap-2 text-xs font-semibold bg-white/5 hover:bg-white/10 text-white/80 border border-white/10 px-4 py-2 rounded-lg transition-colors hover:border-white/20"
                   >
                     <Upload className="h-4 w-4" /> CSV / TXT
                   </button>
                 </div>
+              </div>
+
+              <div className="mb-5 rounded-xl border border-primary/20 bg-primary/5 p-4">
+                <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-primary">
+                  <Search className="h-3.5 w-3.5" />
+                  Import Token Holders
+                </div>
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto]">
+                  <input
+                    value={tokenIdentifier}
+                    onChange={(event) => setTokenIdentifier(event.target.value)}
+                    placeholder="KRC-20 ticker or KCC-20 token ID"
+                    className="min-w-0 rounded-lg border border-white/10 bg-[#02050a] px-3 py-2.5 font-mono text-xs text-white placeholder:text-white/30 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                  <input
+                    value={kasPerHolder}
+                    onChange={(event) => setKasPerHolder(event.target.value)}
+                    inputMode="decimal"
+                    placeholder="KAS each"
+                    aria-label="KAS per holder"
+                    className="min-w-0 rounded-lg border border-white/10 bg-[#02050a] px-3 py-2.5 font-mono text-xs text-white placeholder:text-white/30 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleImportTokenHolders}
+                    disabled={holderImportLoading}
+                    className="flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#02050a] transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {holderImportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    {holderImportLoading ? 'Loading' : 'Import'}
+                  </button>
+                </div>
+                <div className="mt-2 text-[10px] leading-relaxed text-white/35">
+                  KRC-20 uses its ticker. KCC-20 uses the 64-character token ID. Complete holder lists are imported only when the indexer exposes every holder.
+                </div>
+                {holderImportError && (
+                  <div className="mt-3 flex items-start gap-2 text-xs text-destructive">
+                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>{holderImportError}</span>
+                  </div>
+                )}
+                {holderImportResult && (
+                  <div className="mt-3 text-xs text-primary">
+                    Imported {holderImportResult.imported} {holderImportResult.protocol} holder addresses
+                    {holderImportResult.ticker ? ` for ${holderImportResult.ticker}` : ''}
+                    {holderImportResult.excludedCovenantHolders
+                      ? ` (${holderImportResult.excludedCovenantHolders} covenant-owned balance excluded)`
+                      : ''}
+                    {holderImportResult.excludedBurnAddresses
+                      ? ` (${holderImportResult.excludedBurnAddresses} burn address excluded)`
+                      : ''}
+                    .
+                  </div>
+                )}
               </div>
 
               <textarea
@@ -351,7 +554,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                 className="w-full flex-1 rounded-xl bg-[#02050a] border border-white/5 p-5 font-mono text-sm text-primary/80 placeholder:text-primary/60 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition resize-none custom-scrollbar shadow-inner"
               />
 
-              <div className="text-xs text-cyan-200 flex justify-between mt-4 uppercase tracking-widest font-mono">
+              <div className="text-xs text-white/40 flex justify-between mt-4 uppercase tracking-widest font-mono">
                 <span>FMT: ADDR AMT</span>
                 <span>MAX MASS LIMITS APPLY</span>
               </div>
@@ -381,13 +584,13 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                   <div className="flex items-center gap-3">
                     <div className="text-right">
                       <div className="text-xs font-bold text-primary">{account.walletName}</div>
-                      <div className="text-[10px] text-cyan-200 font-mono tracking-wider">
+                      <div className="text-[10px] text-white/50 font-mono tracking-wider">
                         {account.address.slice(0, 10)}…{account.address.slice(-6)}
                       </div>
                     </div>
                     <button
                       onClick={() => setAccount(null)}
-                      className="p-2 bg-white/5 hover:bg-destructive/20 text-cyan-200 hover:text-destructive rounded-lg transition-colors group"
+                      className="p-2 bg-white/5 hover:bg-destructive/20 text-white/50 hover:text-destructive rounded-lg transition-colors group"
                       title="Disconnect"
                     >
                       <X className="h-4 w-4 group-hover:scale-110 transition-transform" />
@@ -409,7 +612,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                   <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
                     <Layers className="h-10 w-10 text-white" />
                   </div>
-                  <div className="text-xs font-semibold text-cyan-200 tracking-widest uppercase mb-1">Recipients</div>
+                  <div className="text-xs font-semibold text-white/40 tracking-widest uppercase mb-1">Recipients</div>
                   <div className="text-2xl font-black text-white font-mono">{recipients.length}</div>
                 </div>
                 <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 shadow-inner relative overflow-hidden group">
@@ -426,11 +629,11 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
               {/* Status Modules */}
               <div className="space-y-3">
                 <div className="rounded-xl bg-white/5 border border-white/5 p-4 text-xs">
-                  <div className="flex items-center justify-between font-bold text-cyan-100 uppercase tracking-wider mb-2">
+                  <div className="flex items-center justify-between font-bold text-white/80 uppercase tracking-wider mb-2">
                     <span>Service Fee</span>
                     <span className="text-primary font-mono bg-primary/10 px-2 py-0.5 rounded text-[10px] border border-primary/20">{SERVICE_FEE_KAS} KAS</span>
                   </div>
-                  <div className="text-cyan-200 leading-relaxed font-light">
+                  <div className="text-white/40 leading-relaxed font-light">
                      Included in the same atomic transaction as every recipient. Fixed cost per batch.
                   </div>
                 </div>
@@ -440,16 +643,20 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                     <div className="font-bold text-primary uppercase tracking-wider flex items-center gap-2">
                       <Zap className="h-3.5 w-3.5" /> Review Transaction
                     </div>
+                    <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/50">
+                      <span>Batch {review.batchNumber} of {review.batchCount}</span>
+                      <span>{review.recipientCount} recipients</span>
+                    </div>
                     <div className="space-y-2 font-mono text-[11px]">
-                      <div className="flex justify-between items-end"><span className="text-cyan-200 uppercase">Recipients</span><span className="text-white">{sompiToKas(review.recipientTotalSompi)} KAS</span></div>
-                      <div className="flex justify-between items-end"><span className="text-cyan-200 uppercase">Service fee</span><span className="text-white">{sompiToKas(review.serviceFeeSompi)} KAS</span></div>
-                      <div className="flex justify-between items-end"><span className="text-cyan-200 uppercase">Network fee</span><span className="text-cyan-100">{sompiToKas(review.networkFeeSompi)} KAS</span></div>
+                      <div className="flex justify-between items-end"><span className="text-white/50 uppercase">Recipients</span><span className="text-white">{sompiToKas(review.recipientTotalSompi)} KAS</span></div>
+                      <div className="flex justify-between items-end"><span className="text-white/50 uppercase">Service fee</span><span className="text-white">{sompiToKas(review.serviceFeeSompi)} KAS</span></div>
+                      <div className="flex justify-between items-end"><span className="text-white/50 uppercase">Network fee</span><span className="text-white/80">{sompiToKas(review.networkFeeSompi)} KAS</span></div>
                     </div>
                     <div className="flex justify-between border-t border-primary/20 pt-3 font-black text-primary text-sm font-mono items-end">
                       <span className="uppercase tracking-widest text-xs">Grand Total</span>
                       <span>{sompiToKas(review.grandTotalSompi)} KAS</span>
                     </div>
-                    <div className="text-[9px] text-cyan-200 uppercase tracking-widest flex justify-between font-mono">
+                    <div className="text-[9px] text-white/30 uppercase tracking-widest flex justify-between font-mono">
                       <span>Mass: {review.mass.toLocaleString()} / {review.maximumMass.toLocaleString()}</span>
                     </div>
                   </div>
@@ -468,7 +675,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                   <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                   <span className="font-semibold tracking-wide">
                     {isFeeSigning
-                      ? 'APPROVING COMPLETE BATCH IN KASWARE...'
+                      ? `APPROVING BATCH ${review?.batchNumber ?? 1} OF ${review?.batchCount ?? Math.ceil(recipients.length / RECIPIENTS_PER_BATCH)}...`
                       : `SIGNING ${recipients.length} RECIPIENTS...`}
                   </span>
                 </div>
@@ -477,7 +684,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
               {/* Transfer list */}
               {recipients.length > 0 && (
                 <div className="flex flex-col min-h-0">
-                  <div className="text-[10px] font-bold text-cyan-200 flex justify-between uppercase tracking-widest mb-3">
+                  <div className="text-[10px] font-bold text-white/30 flex justify-between uppercase tracking-widest mb-3">
                     <span>Distribution Queue</span>
                     <div className="flex gap-3">
                       {sentCount > 0 && <span className="text-primary">{sentCount} SENT</span>}
@@ -493,7 +700,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                           <div className="min-w-0 flex-1">
                             <div className="flex items-baseline justify-between mb-1 pr-4">
                               <div className="font-mono font-bold text-white tracking-tight">{r.amount} KAS</div>
-                              <div className="font-mono text-cyan-200 truncate text-[10px] group-hover:text-cyan-100 transition-colors">
+                              <div className="font-mono text-white/40 truncate text-[10px] group-hover:text-white/60 transition-colors">
                                 {r.address.slice(0, 12)}…{r.address.slice(-6)}
                               </div>
                             </div>
@@ -510,7 +717,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                             {st.error && <div className="text-[10px] text-destructive mt-1 font-mono">{st.error}</div>}
                           </div>
                           <div className="shrink-0 flex items-center justify-end w-20">
-                            {st.status === 'pending' && <span className="text-cyan-200/50 text-[10px] uppercase font-bold tracking-wider">Pending</span>}
+                            {st.status === 'pending' && <span className="text-white/20 text-[10px] uppercase font-bold tracking-wider">Pending</span>}
                             {st.status === 'signing' && (
                               <span className="text-primary flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider">
                                 <Loader2 className="h-3 w-3 animate-spin" /> Sign
@@ -556,7 +763,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                       )}
                     </div>
                     <div className="shrink-0 flex items-center justify-end w-24">
-                      {serviceFeeStatus.status === 'pending' && <span className="text-cyan-200/50 text-[9px] uppercase font-bold tracking-wider text-right leading-tight">Same TX</span>}
+                      {serviceFeeStatus.status === 'pending' && <span className="text-white/20 text-[9px] uppercase font-bold tracking-wider text-right leading-tight">Same TX</span>}
                       {serviceFeeStatus.status === 'signing' && (
                         <span className="text-primary flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider">
                           <Loader2 className="h-3 w-3 animate-spin" /> Apprv
@@ -587,7 +794,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                   onClick={review ? handleSignAndBroadcast : handlePrepareReview}
                   className={`w-full py-4 rounded-xl font-black text-sm tracking-widest uppercase flex items-center justify-center gap-3 transition-all duration-300 relative overflow-hidden ${
                     isProcessing || recipients.length === 0
-                      ? 'bg-white/5 text-cyan-200/50 cursor-not-allowed border border-white/5'
+                      ? 'bg-white/5 text-white/20 cursor-not-allowed border border-white/5'
                       : 'bg-primary hover:bg-[#0cf2d5] text-[#02050a] glow-primary glow-primary-hover border border-transparent hover:scale-[1.02]'
                   }`}
                 >
@@ -598,13 +805,18 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                   {isProcessing ? (
                     <><Loader2 className="h-5 w-5 animate-spin" /> {review ? 'AWAITING KASWARE...' : 'PREPARING TX...'}</>
                   ) : (
-                    <><Send className="h-4 w-4" /> {review ? 'SIGN & BROADCAST' : 'REVIEW TRANSACTION'}</>
+                    <><Send className="h-4 w-4" /> {review
+                      ? `APPROVE ${review.batchCount - review.batchNumber + 1} BATCH${review.batchCount - review.batchNumber + 1 === 1 ? '' : 'ES'}`
+                      : `REVIEW ${Math.ceil(recipients.length / RECIPIENTS_PER_BATCH)} TRANSACTION${Math.ceil(recipients.length / RECIPIENTS_PER_BATCH) === 1 ? '' : 'S'}`}
+                    </>
                   )}
                 </button>
 
                 {recipients.length > 0 && !isProcessing && (
-                  <p className="text-[10px] text-cyan-200 text-center mt-4 uppercase tracking-widest font-mono">
-                    All outputs signed in <span className="text-cyan-100 font-bold">one approval</span>
+                  <p className="text-[10px] text-white/30 text-center mt-4 uppercase tracking-widest font-mono">
+                    {Math.ceil(recipients.length / RECIPIENTS_PER_BATCH) === 1
+                      ? <>All outputs signed in <span className="text-white/60 font-bold">one approval</span></>
+                      : <><span className="text-white/60 font-bold">{Math.ceil(recipients.length / RECIPIENTS_PER_BATCH)} mass-safe transactions</span> • wallet approval required for each</>}
                   </p>
                 )}
               </div>
@@ -632,7 +844,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                 </div>
                 <button
                   onClick={() => setIsWalletModalOpen(false)}
-                  className="rounded-lg p-2 text-cyan-200 hover:bg-white/10 hover:text-white transition-colors"
+                  className="rounded-lg p-2 text-white/40 hover:bg-white/10 hover:text-white transition-colors"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -650,17 +862,14 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                   const isInstalled = wallet.type !== 'extension' || installedMap[wallet.id];
                   const isLoading = walletLoading === wallet.id;
                   
-                  const canConnect = wallet.type === 'extension' || isInstalled;
                   return (
                     <div
                       key={wallet.id}
-                      onClick={() => canConnect && !isLoading && handleConnectWallet(wallet)}
+                      onClick={() => isInstalled && !isLoading && handleConnectWallet(wallet)}
                       className={`group flex items-center justify-between p-4 rounded-xl border transition-all duration-300 ${
-                        wallet.type === 'extension'
+                        isInstalled
                           ? 'border-white/10 bg-white/5 hover:bg-primary/5 hover:border-primary/30 cursor-pointer hover:shadow-[0_0_15px_rgba(11,213,188,0.1)_inset]'
-                          : isInstalled
-                            ? 'border-white/10 bg-white/5 hover:bg-primary/5 hover:border-primary/30 cursor-pointer'
-                            : 'border-white/5 bg-black/40 opacity-50 cursor-not-allowed'
+                          : 'border-white/5 bg-black/40 opacity-50 cursor-not-allowed'
                       }`}
                     >
                       <div className="flex items-center gap-4">
@@ -677,7 +886,7 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
                         </div>
                         <div>
                           <div className="text-sm font-bold text-white tracking-wide">{wallet.name}</div>
-                          <span className="text-[10px] text-cyan-200 uppercase tracking-widest font-mono mt-0.5 block">
+                          <span className="text-[10px] text-white/40 uppercase tracking-widest font-mono mt-0.5 block">
                             {wallet.type === 'extension'
                               ? (isInstalled ? 'BROWSER EXT' : 'NOT INSTALLED')
                               : `APP`}
@@ -723,8 +932,6 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
       `}</style>
     </div>
   );
-
-  if (embedded) return tool;
 
   return (
     <LandingLayout showGrid={false}>
