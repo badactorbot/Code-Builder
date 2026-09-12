@@ -7,6 +7,8 @@ const router = Router();
 const KRON_IDX   = 'https://idx.kron.technology';
 const KASPA_API  = 'https://api.kaspa.org';
 const KASPLEX_API = 'https://api.kasplex.org/v1';
+const KCC20_API = 'https://kcc20.info';
+const HOLDER_PAGE_LIMIT = 1000;
 
 // ── Bech32 helpers (same charset as kaspa.ts) ────────────────────────────────
 const BECH32_CHARS = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
@@ -144,6 +146,145 @@ const COVENANT_OUTPUT_SOMPI = 50_000_000n; // 0.5 KAS
 // estimateTransactionFee is imported from ../lib/kcc20-fee.js
 
 // ── Routes ───────────────────────────────────────────────────────────────────
+
+// Resolve current token holders into ordinary Kaspa recipient addresses.
+// A 64-hex identifier is treated as a KCC-20 token ID; all other valid
+// identifiers are treated as KRC-20 tickers.
+router.get('/token-holders/:identifier', async (req, res) => {
+  const identifier = req.params.identifier.trim();
+  const isKcc20 = /^[0-9a-fA-F]{64}$/.test(identifier);
+  const isKrc20 = /^[a-zA-Z0-9]{1,32}$/.test(identifier);
+
+  if (!isKcc20 && !isKrc20) {
+    res.status(400).json({
+      error: 'Enter a KRC-20 ticker or a 64-character KCC-20 token ID.',
+    });
+    return;
+  }
+
+  try {
+    if (isKcc20) {
+      const tokenId = identifier.toLowerCase();
+      const addressSet = new Set<string>();
+      const seenCursors = new Set<string>();
+      let cursor = '';
+      let validationStatus: string | null = null;
+      let sourceDaa: string | null = null;
+
+      do {
+        const query = new URLSearchParams({ limit: String(HOLDER_PAGE_LIMIT) });
+        if (cursor) query.set('after_owner', cursor);
+        const upstream = await fetch(
+          `${KCC20_API}/v1/tokens/${tokenId}/holders?${query}`,
+          { headers: { Accept: 'application/json', 'User-Agent': 'kasdistro/1.0' } },
+        );
+        const data: any = await upstream.json();
+
+        if (!upstream.ok) {
+          res.status(upstream.status).json({
+            error: data?.detail || data?.error || 'KCC-20 holder lookup failed.',
+          });
+          return;
+        }
+
+        validationStatus = data?.validation?.status ?? validationStatus;
+        sourceDaa = data?.validation?.source_daa ?? sourceDaa;
+        if (
+          validationStatus
+          && !['valid', 'validated', 'complete', 'template_verified', 'verified'].includes(
+            String(validationStatus).toLowerCase(),
+          )
+        ) {
+          res.status(409).json({
+            error: `KCC-20 indexer validation status is "${validationStatus}". Holder import was stopped.`,
+          });
+          return;
+        }
+
+        for (const holder of Array.isArray(data?.holders) ? data.holders : []) {
+          if (typeof holder?.address === 'string' && holder.address.startsWith('kaspa:')) {
+            addressSet.add(holder.address);
+          }
+        }
+
+        const nextCursor = typeof data?.next_cursor === 'string' ? data.next_cursor : '';
+        if (!nextCursor || seenCursors.has(nextCursor) || nextCursor === cursor) break;
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+      } while (cursor);
+
+      const addresses = [...addressSet];
+
+      res.json({
+        protocol: 'KCC-20',
+        identifier: tokenId,
+        addresses,
+        imported: addresses.length,
+        hasMore: false,
+        validationStatus,
+        sourceDaa,
+      });
+      return;
+    }
+
+    const ticker = identifier.toUpperCase();
+    const upstream = await fetch(
+      `${KASPLEX_API}/krc20/token/${encodeURIComponent(ticker)}`,
+      { headers: { Accept: 'application/json', 'User-Agent': 'kasdistro/1.0' } },
+    );
+    const data: any = await upstream.json();
+
+    if (!upstream.ok || data?.message !== 'successful') {
+      res.status(upstream.ok ? 404 : upstream.status).json({
+        error: data?.message || data?.error || 'KRC-20 holder lookup failed.',
+      });
+      return;
+    }
+
+    const token = Array.isArray(data?.result) ? data.result[0] : null;
+    if (!token || token.state !== 'deployed') {
+      res.status(404).json({ error: `KRC-20 token "${ticker}" was not found.` });
+      return;
+    }
+    const holderRows = Array.isArray(token?.holder) ? token.holder : [];
+    const addresses = [...new Set(
+      holderRows
+        .filter((holder: any) => {
+          try {
+            return BigInt(holder?.amount ?? '0') > 0n;
+          } catch {
+            return false;
+          }
+        })
+        .map((holder: any) => holder.address)
+        .filter((address: unknown): address is string => typeof address === 'string' && address.startsWith('kaspa:')),
+    )];
+    const total = Number(token?.holderTotal ?? addresses.length);
+
+    if (Number.isFinite(total) && total > addresses.length) {
+      res.status(409).json({
+        error: `The KRC-20 indexer reports ${total.toLocaleString()} holders but only exposes its top ${addresses.length.toLocaleString()}. Import was stopped to prevent a partial distribution.`,
+        providerLimited: true,
+        totalHolders: total,
+      });
+      return;
+    }
+
+    res.json({
+      protocol: 'KRC-20',
+      identifier: ticker,
+      addresses,
+      imported: addresses.length,
+      hasMore: false,
+      totalHolders: Number.isFinite(total) ? total : null,
+    });
+  } catch (err: any) {
+    res.status(502).json({
+      error: 'Token holder indexer is currently unavailable.',
+      detail: err?.message,
+    });
+  }
+});
 
 // Proxy for Kasplex KRC-20 indexer — api.kasplex.org blocks direct browser
 // requests (CORS / rate-limit → 403). All Kasplex calls must go through here.

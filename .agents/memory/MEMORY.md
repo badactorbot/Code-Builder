@@ -3,3 +3,4 @@
 - [KCC-20 covenant dispersal](kcc20-covenant-dispersal.md) — Full implementation: blake2b via @noble/hashes/blake2.js, signPskt format differs from signKaspaTransaction, Kaspa tx API field is accepting_block_blue_score.
 - [Static frontend rebuild](static-frontend-rebuild.md) — published app serves dist/public; frontend fixes need `PORT=22434 BASE_PATH=/ pnpm run build` in artifacts/kaspa-disperse to reach published users.
 - [KAS single-approval dispersal](kas-only-sendkaspa.md) — KasWare Safe JSON + signPskt/pushTx enables one atomic transaction; enforce the standard mass ceiling.
+- [Token distribution expansion](token-distribution-expansion.md) — KRC-20 is practical via KasWare/indexers; KCC-20 needs explicit covenant adapters and cannot promise universal support.

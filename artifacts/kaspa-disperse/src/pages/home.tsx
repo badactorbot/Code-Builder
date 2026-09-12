@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Wallet, Upload, Send, CheckCircle2, AlertCircle, X,
-  ExternalLink, Loader2, FileText, Layers, Zap, Fingerprint
+  ExternalLink, Loader2, FileText, Layers, Zap, Fingerprint, Search
 } from 'lucide-react';
 
 // ── Wallets ───────────────────────────────────────────────────────────────────
@@ -52,6 +52,9 @@ const KASPA_WALLETS = [
 
 const SERVICE_FEE_KAS = 100;
 const SERVICE_FEE_ADDRESS = 'kaspa:qz6dltvkds80wf8raac504ze4nesgnk72n24jr7krum2m8dq34khvkevr88cc';
+const RECIPIENTS_PER_BATCH = 90;
+const NEXT_BATCH_RETRY_DELAY_MS = 2500;
+const NEXT_BATCH_MAX_RETRIES = 24;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Recipient {
@@ -81,6 +84,35 @@ interface TransactionReview {
   grandTotalSompi: string;
   mass: number;
   maximumMass: number;
+  inputOutpoints: Array<{ transactionId: string; index: number }>;
+}
+
+interface BatchReview extends TransactionReview {
+  batchNumber: number;
+  batchCount: number;
+  recipientStart: number;
+  recipientCount: number;
+}
+
+interface HolderImportResult {
+  protocol: 'KRC-20' | 'KCC-20';
+  identifier: string;
+  addresses: string[];
+  imported: number;
+  hasMore: boolean;
+  totalHolders?: number | null;
+  validationStatus?: string | null;
+  sourceDaa?: string | null;
+}
+
+function resolveApiBase() {
+  const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '');
+  const hostname = window.location.hostname;
+  const usesSameOriginApi = hostname === 'localhost'
+    || hostname === '127.0.0.1'
+    || hostname.endsWith('.replit.app')
+    || hostname.endsWith('.replit.dev');
+  return configuredApiBase ?? (usesSameOriginApi ? '' : 'https://bushwookiekasperse.replit.app');
 }
 
 function GridBackground() {
@@ -106,8 +138,13 @@ export default function Home() {
   const [statuses, setStatuses] = useState<TransferStatus[]>([]);
   const [serviceFeeStatus, setServiceFeeStatus] = useState<TransferStatus>({ status: 'pending', txId: '' });
   const [isProcessing, setIsProcessing] = useState(false);
-  const [review, setReview] = useState<TransactionReview | null>(null);
+  const [review, setReview] = useState<BatchReview | null>(null);
   const [transactionError, setTransactionError] = useState('');
+  const [tokenIdentifier, setTokenIdentifier] = useState('');
+  const [kasPerHolder, setKasPerHolder] = useState('');
+  const [holderImportLoading, setHolderImportLoading] = useState(false);
+  const [holderImportError, setHolderImportError] = useState('');
+  const [holderImportResult, setHolderImportResult] = useState<HolderImportResult | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -163,6 +200,46 @@ export default function Home() {
     reader.readAsText(file);
   };
 
+  const handleImportTokenHolders = async () => {
+    const identifier = tokenIdentifier.trim();
+    const amount = Number(kasPerHolder);
+    setHolderImportError('');
+    setHolderImportResult(null);
+
+    if (!identifier) {
+      setHolderImportError('Enter a KRC-20 ticker or KCC-20 token ID.');
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setHolderImportError('Enter a valid KAS amount per holder.');
+      return;
+    }
+
+    setHolderImportLoading(true);
+    try {
+      const response = await fetch(
+        `${resolveApiBase()}/api/kron/token-holders/${encodeURIComponent(identifier)}`,
+        { headers: { Accept: 'application/json' }, cache: 'no-store' },
+      );
+      const bodyText = await response.text();
+      let body: HolderImportResult & { error?: string };
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        throw new Error(`Holder service returned an invalid response (HTTP ${response.status}).`);
+      }
+      if (!response.ok) throw new Error(body.error || 'Could not load token holders.');
+      if (!body.addresses?.length) throw new Error('No eligible Kaspa holder addresses were found.');
+
+      handleParseInput(body.addresses.map(address => `${address} ${kasPerHolder}`).join('\n'));
+      setHolderImportResult(body);
+    } catch (err: any) {
+      setHolderImportError(err?.message || 'Could not load token holders.');
+    } finally {
+      setHolderImportLoading(false);
+    }
+  };
+
   // ── Connect wallet ───────────────────────────────────────────────────────
   const handleConnectWallet = async (wallet: typeof KASPA_WALLETS[0]) => {
     setWalletError('');
@@ -190,11 +267,11 @@ export default function Home() {
   };
 
   // ── Execute ──────────────────────────────────────────────────────────────
-  const buildDispersalReview = async () => {
-    const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '');
-    const isReplitDeployment = window.location.hostname.endsWith('.replit.app');
-    const apiBase = configuredApiBase
-      ?? (isReplitDeployment ? '' : 'https://bushwookiekasperse.replit.app');
+  const buildDispersalReview = async (
+    batchRecipients: Recipient[],
+    excludedOutpoints: Array<{ transactionId: string; index: number }> = [],
+  ) => {
+    const apiBase = resolveApiBase();
     const endpoint = `${apiBase}/api/kaspa/build-pskt`;
 
     const request = () => fetch(endpoint, {
@@ -205,7 +282,11 @@ export default function Home() {
         'Cache-Control': 'no-cache',
       },
       cache: 'no-store',
-      body: JSON.stringify({ senderAddress: account?.address, recipients }),
+      body: JSON.stringify({
+        senderAddress: account?.address,
+        recipients: batchRecipients,
+        excludedOutpoints,
+      }),
     });
 
     let response = await request();
@@ -252,7 +333,17 @@ export default function Home() {
     setIsProcessing(true);
     setTransactionError('');
     try {
-      setReview(await buildDispersalReview());
+      const firstUnsent = statuses.findIndex(status => status.status !== 'sent');
+      const recipientStart = firstUnsent === -1 ? 0 : firstUnsent;
+      const batchRecipients = recipients.slice(recipientStart, recipientStart + RECIPIENTS_PER_BATCH);
+      const nextReview = await buildDispersalReview(batchRecipients);
+      setReview({
+        ...nextReview,
+        batchNumber: Math.floor(recipientStart / RECIPIENTS_PER_BATCH) + 1,
+        batchCount: Math.ceil(recipients.length / RECIPIENTS_PER_BATCH),
+        recipientStart,
+        recipientCount: batchRecipients.length,
+      });
     } catch (err: any) {
       setTransactionError(err?.message ?? 'Could not prepare transaction.');
     } finally {
@@ -264,29 +355,82 @@ export default function Home() {
     if (!account || !review) return;
     setIsProcessing(true);
     setTransactionError('');
-    setStatuses(recipients.map(() => ({ status: 'signing', txId: '' })));
-    setServiceFeeStatus({ status: 'signing', txId: '' });
     try {
-      const signed = await account.provider.signPskt({
-        txJsonString: review.txJsonString,
-        options: {
-          signInputs: review.inputIndicesToSign.map(index => ({ index, sighashType: 1 })),
-        },
-      });
-      const signedJson = typeof signed === 'string' ? signed : signed?.txJsonString;
-      if (!signedJson) throw new Error('KasWare did not return a signed transaction.');
-      const pushed = await account.provider.pushTx(signedJson);
-      const txId = typeof pushed === 'string'
-        ? (() => { try { return JSON.parse(pushed)?.id ?? pushed; } catch { return pushed; } })()
-        : (pushed?.id ?? pushed?.txId ?? '');
-      setStatuses(recipients.map(() => ({ status: 'sent', txId })));
-      setServiceFeeStatus({ status: 'sent', txId });
+      let currentReview = review;
+      let recipientStart = review.recipientStart;
+      let lastTxId = '';
+      const excludedOutpoints = [...review.inputOutpoints];
+
+      while (recipientStart < recipients.length) {
+        const recipientCount = currentReview.recipientCount;
+        setReview(currentReview);
+        setStatuses(previous => previous.map((status, index) =>
+          index >= recipientStart && index < recipientStart + recipientCount
+            ? { status: 'signing', txId: '' }
+            : status,
+        ));
+        setServiceFeeStatus({ status: 'signing', txId: '' });
+
+        const signed = await account.provider.signPskt({
+          txJsonString: currentReview.txJsonString,
+          options: {
+            signInputs: currentReview.inputIndicesToSign.map(index => ({ index, sighashType: 1 })),
+          },
+        });
+        const signedJson = typeof signed === 'string' ? signed : signed?.txJsonString;
+        if (!signedJson) throw new Error('KasWare did not return a signed transaction.');
+        const pushed = await account.provider.pushTx(signedJson);
+        lastTxId = typeof pushed === 'string'
+          ? (() => { try { return JSON.parse(pushed)?.id ?? pushed; } catch { return pushed; } })()
+          : (pushed?.id ?? pushed?.txId ?? '');
+        setStatuses(previous => previous.map((status, index) =>
+          index >= recipientStart && index < recipientStart + recipientCount
+            ? { status: 'sent', txId: lastTxId }
+            : status,
+        ));
+
+        recipientStart += recipientCount;
+        if (recipientStart >= recipients.length) break;
+
+        const nextRecipients = recipients.slice(recipientStart, recipientStart + RECIPIENTS_PER_BATCH);
+        let nextReview: TransactionReview | null = null;
+        let lastError: any = null;
+        for (let attempt = 0; attempt < NEXT_BATCH_MAX_RETRIES; attempt += 1) {
+          await new Promise(resolve => window.setTimeout(resolve, NEXT_BATCH_RETRY_DELAY_MS));
+          try {
+            nextReview = await buildDispersalReview(nextRecipients, excludedOutpoints);
+            break;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+        if (!nextReview) {
+          throw new Error(
+            `Batch ${Math.floor(recipientStart / RECIPIENTS_PER_BATCH) + 1} could not be prepared after waiting for the previous transaction. ${lastError?.message ?? ''}`.trim(),
+          );
+        }
+        excludedOutpoints.push(...nextReview.inputOutpoints);
+        currentReview = {
+          ...nextReview,
+          batchNumber: Math.floor(recipientStart / RECIPIENTS_PER_BATCH) + 1,
+          batchCount: Math.ceil(recipients.length / RECIPIENTS_PER_BATCH),
+          recipientStart,
+          recipientCount: nextRecipients.length,
+        };
+      }
+
+      setServiceFeeStatus({ status: 'sent', txId: lastTxId });
       setReview(null);
     } catch (err: any) {
       const message = err?.message ?? 'Transaction was rejected.';
-      setStatuses(recipients.map(() => ({ status: 'failed', txId: '', error: message })));
+      setStatuses(previous => previous.map(status =>
+        status.status === 'signing'
+          ? { status: 'failed', txId: '', error: message }
+          : status,
+      ));
       setServiceFeeStatus({ status: 'failed', txId: '', error: message });
       setTransactionError(message);
+      setReview(null);
     } finally {
       setIsProcessing(false);
     }
@@ -318,7 +462,7 @@ export default function Home() {
               <div className="flex items-center justify-between mb-6">
                 <label className="text-sm font-semibold tracking-wide text-white/90 flex items-center gap-2 uppercase">
                   <Fingerprint className="h-4 w-4 text-primary" />
-                   Max 100 Wallets per Mass
+                   90 Wallets per Mass-Safe Batch
                 </label>
                 <div>
                   <input type="file" accept=".csv,.txt" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
@@ -329,6 +473,53 @@ export default function Home() {
                     <Upload className="h-4 w-4" /> CSV / TXT
                   </button>
                 </div>
+              </div>
+
+              <div className="mb-5 rounded-xl border border-primary/20 bg-primary/5 p-4">
+                <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-primary">
+                  <Search className="h-3.5 w-3.5" />
+                  Import Token Holders
+                </div>
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto]">
+                  <input
+                    value={tokenIdentifier}
+                    onChange={(event) => setTokenIdentifier(event.target.value)}
+                    placeholder="KRC-20 ticker or KCC-20 token ID"
+                    className="min-w-0 rounded-lg border border-white/10 bg-[#02050a] px-3 py-2.5 font-mono text-xs text-white placeholder:text-white/30 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                  <input
+                    value={kasPerHolder}
+                    onChange={(event) => setKasPerHolder(event.target.value)}
+                    inputMode="decimal"
+                    placeholder="KAS each"
+                    aria-label="KAS per holder"
+                    className="min-w-0 rounded-lg border border-white/10 bg-[#02050a] px-3 py-2.5 font-mono text-xs text-white placeholder:text-white/30 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleImportTokenHolders}
+                    disabled={holderImportLoading}
+                    className="flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#02050a] transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {holderImportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    {holderImportLoading ? 'Loading' : 'Import'}
+                  </button>
+                </div>
+                <div className="mt-2 text-[10px] leading-relaxed text-white/35">
+                  KRC-20 uses its ticker. KCC-20 uses the 64-character token ID. Complete holder lists are imported only when the indexer exposes every holder.
+                </div>
+                {holderImportError && (
+                  <div className="mt-3 flex items-start gap-2 text-xs text-destructive">
+                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>{holderImportError}</span>
+                  </div>
+                )}
+                {holderImportResult && (
+                  <div className="mt-3 text-xs text-primary">
+                    Imported {holderImportResult.imported} {holderImportResult.protocol} holder addresses
+                    .
+                  </div>
+                )}
               </div>
 
               <textarea
@@ -428,6 +619,10 @@ export default function Home() {
                     <div className="font-bold text-primary uppercase tracking-wider flex items-center gap-2">
                       <Zap className="h-3.5 w-3.5" /> Review Transaction
                     </div>
+                    <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/50">
+                      <span>Batch {review.batchNumber} of {review.batchCount}</span>
+                      <span>{review.recipientCount} recipients</span>
+                    </div>
                     <div className="space-y-2 font-mono text-[11px]">
                       <div className="flex justify-between items-end"><span className="text-white/50 uppercase">Recipients</span><span className="text-white">{sompiToKas(review.recipientTotalSompi)} KAS</span></div>
                       <div className="flex justify-between items-end"><span className="text-white/50 uppercase">Service fee</span><span className="text-white">{sompiToKas(review.serviceFeeSompi)} KAS</span></div>
@@ -456,7 +651,7 @@ export default function Home() {
                   <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                   <span className="font-semibold tracking-wide">
                     {isFeeSigning
-                      ? 'APPROVING COMPLETE BATCH IN KASWARE...'
+                      ? `APPROVING BATCH ${review?.batchNumber ?? 1} OF ${review?.batchCount ?? Math.ceil(recipients.length / RECIPIENTS_PER_BATCH)}...`
                       : `SIGNING ${recipients.length} RECIPIENTS...`}
                   </span>
                 </div>
@@ -586,13 +781,18 @@ export default function Home() {
                   {isProcessing ? (
                     <><Loader2 className="h-5 w-5 animate-spin" /> {review ? 'AWAITING KASWARE...' : 'PREPARING TX...'}</>
                   ) : (
-                    <><Send className="h-4 w-4" /> {review ? 'SIGN & BROADCAST' : 'REVIEW TRANSACTION'}</>
+                    <><Send className="h-4 w-4" /> {review
+                      ? `APPROVE ${review.batchCount - review.batchNumber + 1} BATCH${review.batchCount - review.batchNumber + 1 === 1 ? '' : 'ES'}`
+                      : `REVIEW ${Math.ceil(recipients.length / RECIPIENTS_PER_BATCH)} TRANSACTION${Math.ceil(recipients.length / RECIPIENTS_PER_BATCH) === 1 ? '' : 'S'}`}
+                    </>
                   )}
                 </button>
 
                 {recipients.length > 0 && !isProcessing && (
                   <p className="text-[10px] text-white/30 text-center mt-4 uppercase tracking-widest font-mono">
-                    All outputs signed in <span className="text-white/60 font-bold">one approval</span>
+                    {Math.ceil(recipients.length / RECIPIENTS_PER_BATCH) === 1
+                      ? <>All outputs signed in <span className="text-white/60 font-bold">one approval</span></>
+                      : <><span className="text-white/60 font-bold">{Math.ceil(recipients.length / RECIPIENTS_PER_BATCH)} mass-safe transactions</span> • wallet approval required for each</>}
                   </p>
                 )}
               </div>
