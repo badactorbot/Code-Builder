@@ -32,3 +32,15 @@ Complete holder import is allowed only when the indexer can enumerate every hold
 **Why:** A silently truncated holder list would produce an incomplete reward distribution.
 
 **How to apply:** Reject partial KRC-20 imports until a verified full-holder provider is available. Do not cap a complete source; paginate, deduplicate, and import all resolved Kaspa owner addresses.
+
+KRON KCC-20 holder lookup is phase-dependent: `kcc20.info` may have no snapshot for tokens still on the bonding curve. Resolve known covenant IDs through KRON's registry, then query KRON's live indexer by ticker.
+
+**Why:** KRON's holder endpoint is keyed by ticker and includes curve-owned covenant inventory alongside ordinary wallets.
+
+**How to apply:** Verify the indexer returned every reported holder record, exclude `covenant:` entries, and import only deduplicated `kaspa:` addresses. Preserve readable upstream error messages rather than stringifying error objects.
+
+All token-holder imports must exclude Kaspa's canonical burn address, regardless of token standard or holder data source.
+
+**Why:** The burn balance is permanently inaccessible and must never become a native-KAS distribution recipient; the user confirmed this behavior works as intended.
+
+**How to apply:** Apply the exclusion before completeness comparisons and recipient deduplication for KRON, KCC-20, and KRC-20 imports.

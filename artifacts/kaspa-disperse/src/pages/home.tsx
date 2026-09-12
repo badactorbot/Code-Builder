@@ -103,6 +103,24 @@ interface HolderImportResult {
   totalHolders?: number | null;
   validationStatus?: string | null;
   sourceDaa?: string | null;
+  ticker?: string;
+  source?: string;
+  excludedCovenantHolders?: number;
+  excludedBurnAddresses?: number;
+}
+
+function errorMessage(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (
+    value
+    && typeof value === 'object'
+    && 'message' in value
+    && typeof value.message === 'string'
+    && value.message.trim()
+  ) {
+    return value.message;
+  }
+  return fallback;
 }
 
 function resolveApiBase() {
@@ -222,13 +240,13 @@ export default function Home() {
         { headers: { Accept: 'application/json' }, cache: 'no-store' },
       );
       const bodyText = await response.text();
-      let body: HolderImportResult & { error?: string };
+      let body: HolderImportResult & { error?: unknown };
       try {
         body = JSON.parse(bodyText);
       } catch {
         throw new Error(`Holder service returned an invalid response (HTTP ${response.status}).`);
       }
-      if (!response.ok) throw new Error(body.error || 'Could not load token holders.');
+      if (!response.ok) throw new Error(errorMessage(body.error, 'Could not load token holders.'));
       if (!body.addresses?.length) throw new Error('No eligible Kaspa holder addresses were found.');
 
       handleParseInput(body.addresses.map(address => `${address} ${kasPerHolder}`).join('\n'));
@@ -517,6 +535,13 @@ export default function Home() {
                 {holderImportResult && (
                   <div className="mt-3 text-xs text-primary">
                     Imported {holderImportResult.imported} {holderImportResult.protocol} holder addresses
+                    {holderImportResult.ticker ? ` for ${holderImportResult.ticker}` : ''}
+                    {holderImportResult.excludedCovenantHolders
+                      ? ` (${holderImportResult.excludedCovenantHolders} covenant-owned balance excluded)`
+                      : ''}
+                    {holderImportResult.excludedBurnAddresses
+                      ? ` (${holderImportResult.excludedBurnAddresses} burn address excluded)`
+                      : ''}
                     .
                   </div>
                 )}
