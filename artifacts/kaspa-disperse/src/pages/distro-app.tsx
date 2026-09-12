@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { kaspaApiBase } from '@/lib/dispenser/api';
 import { extractWalletAddresses, waitForWalletProvider } from '@/lib/dispenser/wallets';
+import { LandingLayout } from '@/components/dispenser/landing-layout';
 
 // ── Wallets ───────────────────────────────────────────────────────────────────
 const KASPA_WALLETS = [
@@ -312,9 +313,9 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
   const sompiToKas = (sompi: string) => (Number(sompi) / 1e8).toLocaleString(undefined, { maximumFractionDigits: 8 });
 
   // ── Render ───────────────────────────────────────────────────────────────
-  return (
-    <div className={`${embedded ? 'relative min-h-[min(92dvh,1100px)] overflow-hidden rounded-2xl bg-[#030914]' : 'min-h-screen'} flex flex-col z-10 selection:bg-primary/30 selection:text-white`}>
-      <GridBackground contained={embedded} />
+  const tool = (
+    <div className="relative min-h-[min(92dvh,1100px)] overflow-hidden rounded-2xl bg-[#030914] flex flex-col z-10 selection:bg-primary/30 selection:text-white">
+      <GridBackground contained />
 
       {/* MAIN */}
       <main className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-10 grid lg:grid-cols-12 gap-8 flex-1 items-stretch">
@@ -721,5 +722,13 @@ export default function DistroApp({ embedded = false }: { embedded?: boolean }) 
         }
       `}</style>
     </div>
+  );
+
+  if (embedded) return tool;
+
+  return (
+    <LandingLayout showGrid={false}>
+      <div className="px-4 sm:px-6 py-10">{tool}</div>
+    </LandingLayout>
   );
 }

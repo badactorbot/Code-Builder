@@ -86,18 +86,23 @@ function SocialLinks({
   );
 }
 
-export function LandingLayout({ children }: { children: ReactNode }) {
-  return (
-    <div className="relative min-h-dvh text-zinc-100">
-      <KineticGrid pinned>
+export function LandingLayout({
+  children,
+  showGrid = true,
+}: {
+  children: ReactNode;
+  showGrid?: boolean;
+}) {
+  const chrome = (
+    <>
         <header className="sticky top-0 z-50 border-b border-cyan-900/20 bg-[#060a0e]/55 backdrop-blur-xl">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 h-20 flex items-center gap-10">
-            <nav className="hidden md:flex items-center gap-8">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 h-20 flex items-center gap-6">
+            <nav className="hidden lg:flex items-center gap-6">
               {LINKS.map((link) => (
                 <NavAnchor
                   key={link.href}
                   href={link.href}
-                  className="text-lg font-medium text-cyan-200 hover:text-white transition"
+                  className="whitespace-nowrap text-base font-medium text-cyan-200 hover:text-white transition"
                 >
                   {link.label}
                 </NavAnchor>
@@ -106,16 +111,16 @@ export function LandingLayout({ children }: { children: ReactNode }) {
             <div className="ml-auto flex items-center gap-3">
               <SocialLinks size="lg" />
               <NavAnchor
-                href="/#distro"
-                className="kd-btn inline-flex items-center gap-2 text-black font-bold text-sm sm:text-base px-5 sm:px-6 py-3 rounded-xl uppercase tracking-wide shadow-[0_0_28px_rgba(34,211,238,0.55)]"
+                href="/distro"
+                className="kd-btn inline-flex items-center justify-center whitespace-nowrap text-black font-bold text-sm px-5 py-3 rounded-xl uppercase tracking-wide shadow-[0_0_28px_rgba(34,211,238,0.55)]"
               >
-                Open
+                Open Kasdistro
               </NavAnchor>
               <a
                 href={KRON_CHART_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hidden sm:inline-flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-5 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/70 hover:bg-cyan-500/20 hover:text-white"
+                className="hidden sm:inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/70 hover:bg-cyan-500/20 hover:text-white"
               >
                 BUY KDIST
               </a>
@@ -130,7 +135,7 @@ export function LandingLayout({ children }: { children: ReactNode }) {
             <div className="text-sm text-cyan-200">KASDISTRO</div>
             <div className="flex items-center gap-6 text-xs text-cyan-200">
               <NavAnchor href="/#how-it-works" className="hover:text-cyan-100">How It Works</NavAnchor>
-              <NavAnchor href="/#distro" className="hover:text-cyan-100">Open</NavAnchor>
+              <NavAnchor href="/distro" className="hover:text-cyan-100">Open Kasdistro</NavAnchor>
               <NavAnchor href="/#token-distribution" className="hover:text-cyan-100">Token Distribution</NavAnchor>
               <NavAnchor href="/#holder-rewards" className="hover:text-cyan-100">Holder Rewards</NavAnchor>
               <NavAnchor href="/kaspaper" className="hover:text-cyan-100">Kaspaper</NavAnchor>
@@ -138,7 +143,12 @@ export function LandingLayout({ children }: { children: ReactNode }) {
             <SocialLinks />
           </div>
         </footer>
-      </KineticGrid>
+    </>
+  );
+
+  return (
+    <div className="relative min-h-dvh bg-[#060a0e] text-zinc-100">
+      {showGrid ? <KineticGrid pinned>{chrome}</KineticGrid> : chrome}
     </div>
   );
 }

@@ -13,7 +13,6 @@ import {
 import { LandingLayout } from '@/components/dispenser/landing-layout';
 import { DispenserLogo } from '@/components/dispenser/brand-logo';
 import { TokenDistributionChart } from '@/components/dispenser/token-distribution-chart';
-import DistroApp from '@/pages/distro-app';
 
 const USE_CASES = [
   'Community Rewards',
@@ -45,10 +44,10 @@ const AUDIENCES = [
 function CtaButton({ className = '', large = false }: { className?: string; large?: boolean }) {
   return (
     <a
-      href="#distro"
+      href="/distro"
       className={`kd-btn inline-flex items-center justify-center gap-2 text-black font-bold rounded-xl uppercase tracking-wide transition ${large ? 'px-10 py-4 text-sm' : 'px-6 py-3 text-xs sm:text-sm'} ${className}`}
     >
-      Open Distro <ArrowRight className="h-4 w-4" />
+      Open Kasdistro <ArrowRight className="h-4 w-4" />
     </a>
   );
 }
@@ -100,20 +99,6 @@ export default function Home() {
                   <p className="text-sm text-cyan-200 leading-relaxed">{step.body}</p>
                 </div>
               ))}
-            </div>
-          </div>
-        </section>
-
-        <section id="distro" className="border-t border-cyan-900/20 py-16 sm:py-20">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6">
-            <div className="text-center mb-8">
-              <h2 className="text-2xl sm:text-3xl font-bold text-white">Distro</h2>
-              <p className="mt-3 text-cyan-200 max-w-xl mx-auto">
-                Load your list, set rewards, and send KAS — right here.
-              </p>
-            </div>
-            <div className="relative z-10">
-              <DistroApp embedded />
             </div>
           </div>
         </section>
@@ -214,10 +199,10 @@ export default function Home() {
             <p className="text-cyan-200 mb-2">You decide who receives KAS and how much.</p>
             <p className="text-cyan-100 font-medium mb-10">Bulk distribution made simple.</p>
             <a
-              href="#distro"
+              href="/distro"
               className="kd-btn inline-flex items-center gap-2 text-black font-bold px-10 py-4 rounded-xl uppercase tracking-wide text-sm"
             >
-              <Upload className="h-4 w-4" /> Open Distro
+              <Upload className="h-4 w-4" /> Open Kasdistro
             </a>
           </div>
         </section>
