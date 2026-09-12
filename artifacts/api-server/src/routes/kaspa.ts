@@ -122,9 +122,10 @@ function calculateP2pkMass(inputCount: number, outputScripts: string[]): number 
 
 router.post('/build-pskt', async (req, res) => {
   try {
-    const { senderAddress, recipients } = req.body as {
+    const { senderAddress, recipients, excludedOutpoints = [] } = req.body as {
       senderAddress: string;
       recipients: Array<{ address: string; amount: string | number }>;
+      excludedOutpoints?: Array<{ transactionId: string; index: number }>;
     };
     if (!senderAddress?.startsWith('kaspa:') || !Array.isArray(recipients) || recipients.length === 0) {
       return res.status(400).json({ error: 'A mainnet sender and at least one recipient are required.' });
@@ -149,6 +150,9 @@ router.post('/build-pskt', async (req, res) => {
     if (!utxoResponse.ok) throw new Error(`UTXO lookup failed (${utxoResponse.status}).`);
     const rawUtxos = await utxoResponse.json() as any[];
     const mempoolSpent = new Set<string>();
+    const explicitlyExcluded = new Set(
+      excludedOutpoints.map(outpoint => `${outpoint.transactionId}:${outpoint.index}`),
+    );
     if (transactionResponse.ok) {
       for (const transaction of await transactionResponse.json() as any[]) {
         if (transaction.is_accepted === false) {
@@ -165,7 +169,10 @@ router.post('/build-pskt', async (req, res) => {
       script: String(utxo.utxoEntry.scriptPublicKey.scriptPublicKey),
       blockDaaScore: String(utxo.utxoEntry.blockDaaScore),
       isCoinbase: Boolean(utxo.utxoEntry.isCoinbase),
-    })).filter(utxo => !mempoolSpent.has(`${utxo.transactionId}:${utxo.index}`))
+    })).filter(utxo =>
+      !mempoolSpent.has(`${utxo.transactionId}:${utxo.index}`)
+      && !explicitlyExcluded.has(`${utxo.transactionId}:${utxo.index}`),
+    )
       .sort((a, b) => a.amount > b.amount ? -1 : a.amount < b.amount ? 1 : 0);
     if (!utxos.length) return res.status(400).json({ error: 'No spendable UTXOs are available.' });
 
@@ -266,6 +273,10 @@ router.post('/build-pskt', async (req, res) => {
       grandTotalSompi: (paymentSompi + SERVICE_FEE_SOMPI + networkFee).toString(),
       mass,
       maximumMass: MassCalculator.maximumStandardTransactionMass(),
+      inputOutpoints: selected.map(utxo => ({
+        transactionId: utxo.transactionId,
+        index: utxo.index,
+      })),
     });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? 'Transaction build failed.' });
