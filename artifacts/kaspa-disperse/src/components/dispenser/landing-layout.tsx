@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react';
-import { Link } from 'wouter';
+import { Home } from 'lucide-react';
+import { Link, useLocation } from 'wouter';
 import KineticGrid from '@/components/ui/kinetic-grid';
 import { KRON_CHART_URL } from '@/lib/dispenser/constants';
 
@@ -93,10 +94,22 @@ export function LandingLayout({
   children: ReactNode;
   showGrid?: boolean;
 }) {
+  const [location] = useLocation();
+  const showHome = location !== '/';
+
   const chrome = (
     <>
         <header className="sticky top-0 z-50 border-b border-cyan-900/20 bg-[#060a0e]/55 backdrop-blur-xl">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 h-20 flex items-center gap-6">
+            {showHome ? (
+              <Link
+                href="/"
+                className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/70 hover:bg-cyan-500/20 hover:text-white"
+              >
+                <Home className="h-4 w-4" />
+                Home
+              </Link>
+            ) : null}
             <nav className="hidden lg:flex items-center gap-6">
               {LINKS.map((link) => (
                 <NavAnchor
@@ -134,6 +147,9 @@ export function LandingLayout({
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-sm text-cyan-200">KASDISTRO</div>
             <div className="flex items-center gap-6 text-xs text-cyan-200">
+              {showHome ? (
+                <NavAnchor href="/" className="hover:text-cyan-100">Home</NavAnchor>
+              ) : null}
               <NavAnchor href="/#how-it-works" className="hover:text-cyan-100">How It Works</NavAnchor>
               <NavAnchor href="/distro" className="hover:text-cyan-100">Open Kasdistro</NavAnchor>
               <NavAnchor href="/#token-distribution" className="hover:text-cyan-100">Token Distribution</NavAnchor>
