@@ -4,9 +4,6 @@ import { LandingLayout } from '@/components/dispenser/landing-layout';
 import { DispenserLogo } from '@/components/dispenser/brand-logo';
 import { SERVICE_FEE_ADDRESS } from '@/lib/dispenser/constants';
 
-const BURN_ADDRESS =
-  'kaspa:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqkx9awp4e';
-
 const INGESTION = [
   'Manually entered Kaspa target addresses',
   'KRC-20 token-holder verified snapshots',
@@ -21,18 +18,18 @@ const RISKS = [
 ];
 
 const WORKFLOW = [
-  'User connects a compatible KasWare wallet.',
+  'User connects a compatible Kaspa wallet.',
   'Recipient source is selected, ingested, and validated.',
   'Addresses are deduplicated and purged of ineligible records.',
   'Recipients are batched into groups of 90.',
-  'Transactions are sequentially constructed, signed via KasWare, and broadcast with an automated 100 KAS service fee per batch.',
+  'Transactions are sequentially constructed, signed to a Kaspa wallet, and broadcast with an automated 100 KAS service fee per batch.',
 ];
 
 const PRINCIPLES = [
   {
     icon: Shield,
     title: 'Non-Custodial Authorization',
-    body: 'Zero private key exposure; absolute user sovereignty via KasWare.',
+    body: 'Zero private key exposure; absolute user sovereignty via Kaspa Wallet.',
   },
   {
     icon: Layers,
@@ -65,7 +62,7 @@ const ROADMAP = [
   {
     phase: '01',
     title: 'Core Distribution',
-    body: 'Native-KAS distribution, KasWare integration, 90-recipient batching, and sequential UTXO handling.',
+    body: 'Native-KAS distribution, Kaspa wallet integration, 90-recipient batching, and sequential UTXO handling.',
   },
   {
     phase: '02',
@@ -169,17 +166,6 @@ export default function Kaspaper() {
           </p>
         </header>
 
-        <div className="mx-auto max-w-3xl px-4 sm:px-6 pb-8">
-          <blockquote className="kd-glass-strong rounded-2xl px-6 py-7 text-center">
-            <p className="text-lg sm:text-xl font-medium leading-relaxed text-white">
-              KasDistro revenue = completed transactions × 100 KAS.
-            </p>
-            <p className="mt-3 text-sm text-zinc-400">
-              Simple, transparent, and protocol-native.
-            </p>
-          </blockquote>
-        </div>
-
         <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 sm:py-16 space-y-20">
           <Section num="01" title="Executive Summary">
             <p>
@@ -276,7 +262,6 @@ export default function Kaspaper() {
               Universal safeguards hardcoded across all distribution paths purge the canonical
               burn address and contract-owned covenant inventory (<span className="font-mono text-cyan-300">covenant:</span>).
             </p>
-            <p className="break-all font-mono text-xs text-cyan-300/80">{BURN_ADDRESS}</p>
             <PaperTable
               headers={['Recipient Range', 'Max Batch', 'Transactions', 'Service Fee']}
               rows={BATCH_ROWS}
