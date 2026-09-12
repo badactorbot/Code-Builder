@@ -109,7 +109,7 @@ export function LandingLayout({ children }: { children: ReactNode }) {
                 href="/#distro"
                 className="kd-btn inline-flex items-center gap-2 text-black font-bold text-sm sm:text-base px-5 sm:px-6 py-3 rounded-xl uppercase tracking-wide shadow-[0_0_28px_rgba(34,211,238,0.55)]"
               >
-                Use Kasdistro
+                Open
               </NavAnchor>
               <a
                 href={KRON_CHART_URL}
@@ -130,7 +130,7 @@ export function LandingLayout({ children }: { children: ReactNode }) {
             <div className="text-sm text-cyan-200">KASDISTRO</div>
             <div className="flex items-center gap-6 text-xs text-cyan-200">
               <NavAnchor href="/#how-it-works" className="hover:text-cyan-100">How It Works</NavAnchor>
-              <NavAnchor href="/#distro" className="hover:text-cyan-100">Use Kasdistro</NavAnchor>
+              <NavAnchor href="/#distro" className="hover:text-cyan-100">Open</NavAnchor>
               <NavAnchor href="/#token-distribution" className="hover:text-cyan-100">Token Distribution</NavAnchor>
               <NavAnchor href="/#holder-rewards" className="hover:text-cyan-100">Holder Rewards</NavAnchor>
               <NavAnchor href="/kaspaper" className="hover:text-cyan-100">Kaspaper</NavAnchor>
