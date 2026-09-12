@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import Home from '@/pages/home';
 import DistroApp from '@/pages/distro-app';
+import Kaspaper from '@/pages/kaspaper';
 import NotFound from '@/pages/not-found';
 import {
   Route,
@@ -20,6 +21,7 @@ function Router() {
     <RoutedErrorBoundary>
       <Switch>
         <Route path="/" component={Home} />
+        <Route path="/kaspaper" component={Kaspaper} />
         <Route path="/dispenser" component={DistroApp} />
         <Route path="/distro" component={DistroApp} />
         <Route component={NotFound} />

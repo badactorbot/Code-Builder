@@ -1,6 +1,41 @@
 import { type ReactNode } from 'react';
+import { Link } from 'wouter';
 import KineticGrid from '@/components/ui/kinetic-grid';
 import { KRON_CHART_URL } from '@/lib/dispenser/constants';
+
+function NavAnchor({
+  href,
+  className,
+  children,
+}: {
+  href: string;
+  className: string;
+  children: ReactNode;
+}) {
+  if (href.startsWith('/#')) {
+    const hash = href.slice(2);
+    return (
+      <Link
+        href="/"
+        className={className}
+        onClick={() => {
+          window.setTimeout(() => {
+            document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth' });
+            window.history.replaceState(null, '', href);
+          }, 50);
+        }}
+      >
+        {children}
+      </Link>
+    );
+  }
+
+  return (
+    <Link href={href} className={className}>
+      {children}
+    </Link>
+  );
+}
 
 const LINKS = [
   { label: 'How It Works', href: '/#how-it-works' },
@@ -9,6 +44,7 @@ const LINKS = [
   { label: 'Token Distribution', href: '/#token-distribution' },
   { label: 'Chart', href: '/#chart' },
   { label: 'Holder Rewards', href: '/#holder-rewards' },
+  { label: 'Kaspaper', href: '/kaspaper' },
 ];
 
 const SOCIALS = [
@@ -60,13 +96,13 @@ export function LandingLayout({ children }: { children: ReactNode }) {
           <div className="max-w-6xl mx-auto px-4 sm:px-6 h-20 flex items-center gap-10">
             <nav className="hidden md:flex items-center gap-8">
               {LINKS.map((link) => (
-                <a
+                <NavAnchor
                   key={link.href}
                   href={link.href}
                   className="text-lg font-medium text-cyan-200 hover:text-white transition"
                 >
                   {link.label}
-                </a>
+                </NavAnchor>
               ))}
             </nav>
             <div className="ml-auto flex items-center gap-3">
@@ -89,11 +125,12 @@ export function LandingLayout({ children }: { children: ReactNode }) {
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-sm text-cyan-200">KASDISTRO</div>
             <div className="flex items-center gap-6 text-xs text-cyan-200">
-              <a href="/#how-it-works" className="hover:text-cyan-100">How It Works</a>
-              <a href="/#distro" className="hover:text-cyan-100">Distro</a>
-              <a href="/#token-distribution" className="hover:text-cyan-100">Token Distribution</a>
-              <a href="/#chart" className="hover:text-cyan-100">Chart</a>
-              <a href="/#holder-rewards" className="hover:text-cyan-100">Holder Rewards</a>
+              <NavAnchor href="/#how-it-works" className="hover:text-cyan-100">How It Works</NavAnchor>
+              <NavAnchor href="/#distro" className="hover:text-cyan-100">Distro</NavAnchor>
+              <NavAnchor href="/#token-distribution" className="hover:text-cyan-100">Token Distribution</NavAnchor>
+              <NavAnchor href="/#chart" className="hover:text-cyan-100">Chart</NavAnchor>
+              <NavAnchor href="/#holder-rewards" className="hover:text-cyan-100">Holder Rewards</NavAnchor>
+              <NavAnchor href="/kaspaper" className="hover:text-cyan-100">Kaspaper</NavAnchor>
             </div>
             <SocialLinks />
           </div>
