@@ -27,11 +27,17 @@ For holder-reward distributions that produce multiple native-KAS transactions, c
 
 **How to apply:** Show the transaction count and per-transaction approval requirement before signing. Preserve completed batches if a later batch fails, and never retry a broadcast blindly.
 
-Complete holder import is allowed only when the indexer can enumerate every holder. KCC-20 supports cursor pagination; the public Kasplex KRC-20 API exposes only its top holders and must not be treated as complete.
+Complete holder import is allowed only when the indexer can enumerate every holder. KCC-20 supports cursor pagination; public Kasplex and Kaspa.com KRC-20 APIs expose only top holders and must not be treated as complete.
 
 **Why:** A silently truncated holder list would produce an incomplete reward distribution.
 
-**How to apply:** Reject partial KRC-20 imports until a verified full-holder provider is available. Do not cap a complete source; paginate, deduplicate, and import all resolved Kaspa owner addresses.
+**How to apply:** KRC-20 uses its L1 ticker, not a `0x` address. Reject partial imports until a verified full-holder provider exists; paginate complete sources, deduplicate, and import only resolved `kaspa:` owners.
+
+KasDistro is strictly Kaspa Layer 1. Do not support EVM token contracts, `0x` holder addresses, or cross-layer address mapping.
+
+**Why:** Native-KAS distributions require verifiable L1 `kaspa:` recipients, and the user confirmed this is an absolute product boundary.
+
+**How to apply:** Reject EVM identifiers explicitly. Keep KRC-20 ticker imports, supported KCC-20 identifiers, holder validation, transaction construction, and explorer links on Kaspa L1 only.
 
 KRON KCC-20 holder lookup is phase-dependent: `kcc20.info` may have no snapshot for tokens still on the bonding curve. Resolve known covenant IDs through KRON's registry, then query KRON's live indexer by ticker.
 

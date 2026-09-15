@@ -15,6 +15,8 @@ const SERVICE_FEE_ADDRESS = 'kaspa:qz6dltvkds80wf8raac504ze4nesgnk72n24jr7krum2m
 // returns the mass under the installed WASM SDK's current consensus settings,
 // while the node enforces the 100 sompi/unit standardness floor.
 const MIN_RELAY_FEE_SOMPI_PER_MASS = 100n;
+const MAX_COMPUTE_MASS = MassCalculator.maximumStandardTransactionMass();
+const MAX_STORAGE_MASS = 500_000;
 
 // ---------------------------------------------------------------------------
 // Kaspa bech32 address → P2PK scriptPublicKey (pure JS, no kaspa-wasm needed)
@@ -120,6 +122,52 @@ function calculateP2pkMass(inputCount: number, outputScripts: string[]): number 
     + Number(calculator.calcMassForOutputs(outputs));
 }
 
+async function calculateConsensusMass(
+  inputs: Array<{ transactionId: string; index: number }>,
+  outputs: Array<{ value: bigint; script: string }>,
+): Promise<{ mass: number; computeMass: number; storageMass: number }> {
+  const upstream = await fetch(`${API_BASE.mainnet}/transactions/mass`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'kasdistro/1.0',
+    },
+    body: JSON.stringify({
+      version: 0,
+      inputs: inputs.map(input => ({
+        previousOutpoint: {
+          transactionId: input.transactionId,
+          index: input.index,
+        },
+        signatureScript: '',
+        sequence: 0,
+        sigOpCount: 1,
+      })),
+      outputs: outputs.map(output => ({
+        amount: output.value.toString(),
+        scriptPublicKey: {
+          version: 0,
+          scriptPublicKey: output.script,
+        },
+      })),
+      lockTime: 0,
+      subnetworkId: '0000000000000000000000000000000000000000',
+    }),
+  });
+  const data: any = await upstream.json();
+  if (!upstream.ok) {
+    throw new Error(data?.detail || data?.error || `Kaspa mass calculation failed (${upstream.status}).`);
+  }
+  const mass = Number(data?.mass);
+  const computeMass = Number(data?.compute_mass);
+  const storageMass = Number(data?.storage_mass);
+  if (![mass, computeMass, storageMass].every(Number.isFinite)) {
+    throw new Error('Kaspa mass calculation returned an invalid response.');
+  }
+  return { mass, computeMass, storageMass };
+}
+
 router.post('/build-pskt', async (req, res) => {
   try {
     const { senderAddress, recipients, excludedOutpoints = [] } = req.body as {
@@ -178,19 +226,28 @@ router.post('/build-pskt', async (req, res) => {
 
     const selected: typeof utxos = [];
     let selectedTotal = 0n;
+    let computeMass = 0;
+    let storageMass = 0;
     let mass = 0;
     let networkFee = 0n;
     const baseScripts = [...normalizedRecipients.map(recipient => recipient.script), serviceScript];
     for (const utxo of utxos) {
       selected.push(utxo);
       selectedTotal += utxo.amount;
-      mass = calculateP2pkMass(selected.length, [...baseScripts, senderScript]);
-      networkFee = BigInt(mass) * MIN_RELAY_FEE_SOMPI_PER_MASS;
+      computeMass = calculateP2pkMass(selected.length, [...baseScripts, senderScript]);
+      networkFee = BigInt(computeMass) * MIN_RELAY_FEE_SOMPI_PER_MASS;
       if (selectedTotal >= paymentSompi + SERVICE_FEE_SOMPI + networkFee) break;
     }
-    if (mass > MassCalculator.maximumStandardTransactionMass()) {
+    if (computeMass > MAX_COMPUTE_MASS) {
       return res.status(400).json({
-        error: `This dispersal is too large for one Kaspa transaction (${mass.toLocaleString()} / ${MassCalculator.maximumStandardTransactionMass().toLocaleString()} mass). Reduce the recipient count.`,
+        code: 'MASS_LIMIT_EXCEEDED',
+        error: `This dispersal exceeds Kaspa's compute-mass limit (${computeMass.toLocaleString()} / ${MAX_COMPUTE_MASS.toLocaleString()}). Reduce the recipient count.`,
+        mass: computeMass,
+        computeMass,
+        storageMass: null,
+        maximumMass: MAX_COMPUTE_MASS,
+        maximumComputeMass: MAX_COMPUTE_MASS,
+        maximumStorageMass: MAX_STORAGE_MASS,
       });
     }
     let change = selectedTotal - paymentSompi - SERVICE_FEE_SOMPI - networkFee;
@@ -199,10 +256,69 @@ router.post('/build-pskt', async (req, res) => {
         error: `Insufficient funds. Need ${(paymentSompi + SERVICE_FEE_SOMPI + networkFee).toString()} sompi.`,
       });
     }
-    if (change > 0n && MassCalculator.isStandardOutputAmountDust(change)) {
-      networkFee += change;
-      change = 0n;
-      mass = calculateP2pkMass(selected.length, baseScripts);
+
+    let outputSpecs: Array<{ value: bigint; script: string }> = [];
+    let massFeeSatisfied = false;
+    for (let iteration = 0; iteration < utxos.length + 12; iteration += 1) {
+      change = selectedTotal - paymentSompi - SERVICE_FEE_SOMPI - networkFee;
+      if (change < 0n) {
+        return res.status(400).json({
+          error: `Insufficient funds. Need ${(paymentSompi + SERVICE_FEE_SOMPI + networkFee).toString()} sompi.`,
+        });
+      }
+      let absorbedDust = false;
+      if (change > 0n && MassCalculator.isStandardOutputAmountDust(change)) {
+        networkFee += change;
+        change = 0n;
+        absorbedDust = true;
+      }
+      outputSpecs = [
+        ...normalizedRecipients.map(recipient => ({ value: recipient.sompi, script: recipient.script })),
+        { value: SERVICE_FEE_SOMPI, script: serviceScript },
+        ...(change > 0n ? [{ value: change, script: senderScript }] : []),
+      ];
+      computeMass = calculateP2pkMass(selected.length, outputSpecs.map(output => output.script));
+      const consensusMass = await calculateConsensusMass(selected, outputSpecs);
+      mass = consensusMass.mass;
+      storageMass = consensusMass.storageMass;
+      computeMass = consensusMass.computeMass;
+
+      if (
+        storageMass > MAX_STORAGE_MASS
+        && computeMass <= MAX_COMPUTE_MASS
+        && selected.length < utxos.length
+      ) {
+        const nextUtxo = utxos[selected.length];
+        selected.push(nextUtxo);
+        selectedTotal += nextUtxo.amount;
+        continue;
+      }
+
+      if (computeMass > MAX_COMPUTE_MASS || storageMass > MAX_STORAGE_MASS) {
+        const exceeded = storageMass > MAX_STORAGE_MASS ? 'storage' : 'compute';
+        const measured = exceeded === 'storage' ? storageMass : computeMass;
+        const maximum = exceeded === 'storage' ? MAX_STORAGE_MASS : MAX_COMPUTE_MASS;
+        return res.status(400).json({
+          code: 'MASS_LIMIT_EXCEEDED',
+          error: `This dispersal exceeds Kaspa's ${exceeded}-mass limit (${measured.toLocaleString()} / ${maximum.toLocaleString()}). Reduce the recipient count.`,
+          mass,
+          computeMass,
+          storageMass,
+          maximumMass: maximum,
+          maximumComputeMass: MAX_COMPUTE_MASS,
+          maximumStorageMass: MAX_STORAGE_MASS,
+        });
+      }
+
+      const minimumFee = BigInt(mass) * MIN_RELAY_FEE_SOMPI_PER_MASS;
+      if (networkFee === minimumFee || (absorbedDust && networkFee >= minimumFee)) {
+        massFeeSatisfied = true;
+        break;
+      }
+      networkFee = minimumFee;
+    }
+    if (!massFeeSatisfied) {
+      throw new Error('Kaspa mass-based fee calculation did not converge.');
     }
 
     const inputs = selected.map(utxo => ({
@@ -219,14 +335,10 @@ router.post('/build-pskt', async (req, res) => {
         isCoinbase: utxo.isCoinbase,
       },
     }));
-    const outputs = [
-      ...normalizedRecipients.map(recipient => ({
-        value: recipient.sompi.toString(),
-        scriptPublicKey: safeScript(recipient.script),
-      })),
-      { value: SERVICE_FEE_SOMPI.toString(), scriptPublicKey: safeScript(serviceScript) },
-      ...(change > 0n ? [{ value: change.toString(), scriptPublicKey: safeScript(senderScript) }] : []),
-    ];
+    const outputs = outputSpecs.map(output => ({
+      value: output.value.toString(),
+      scriptPublicKey: safeScript(output.script),
+    }));
     const transaction = new Transaction({
       version: 0,
       inputs: selected.map(utxo => ({
@@ -272,7 +384,11 @@ router.post('/build-pskt', async (req, res) => {
       networkFeeSompi: networkFee.toString(),
       grandTotalSompi: (paymentSompi + SERVICE_FEE_SOMPI + networkFee).toString(),
       mass,
-      maximumMass: MassCalculator.maximumStandardTransactionMass(),
+      computeMass,
+      storageMass,
+      maximumMass: storageMass >= computeMass ? MAX_STORAGE_MASS : MAX_COMPUTE_MASS,
+      maximumComputeMass: MAX_COMPUTE_MASS,
+      maximumStorageMass: MAX_STORAGE_MASS,
       inputOutpoints: selected.map(utxo => ({
         transactionId: utxo.transactionId,
         index: utxo.index,

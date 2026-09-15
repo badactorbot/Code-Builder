@@ -245,8 +245,11 @@ router.get('/token-holders/:identifier', async (req, res) => {
   const isKrc20 = /^[a-zA-Z0-9]{1,32}$/.test(identifier);
 
   if (!isKcc20 && !isKrc20) {
+    const isEvmContract = /^0x[0-9a-fA-F]{40}$/.test(identifier);
     res.status(400).json({
-      error: 'Enter a KRC-20 ticker or a 64-character KCC-20 token ID.',
+      error: isEvmContract
+        ? 'This is an EVM contract address, not a Kaspa L1 KRC-20 ticker. Enter the token ticker shown by Kasplex, such as NACHO.'
+        : 'Enter a KRC-20 ticker or a 64-character KCC-20 token ID.',
     });
     return;
   }
@@ -357,7 +360,7 @@ router.get('/token-holders/:identifier', async (req, res) => {
     }
 
     const token = Array.isArray(data?.result) ? data.result[0] : null;
-    if (!token || token.state !== 'deployed') {
+    if (!token || !['deployed', 'finished'].includes(token.state)) {
       res.status(404).json({ error: `KRC-20 token "${ticker}" was not found.` });
       return;
     }
