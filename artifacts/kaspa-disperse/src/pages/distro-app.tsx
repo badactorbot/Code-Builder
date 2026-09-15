@@ -55,7 +55,6 @@ const KASPA_WALLETS = [
 
 const SERVICE_FEE_KAS = 100;
 const SERVICE_FEE_ADDRESS = 'kaspa:qz6dltvkds80wf8raac504ze4nesgnk72n24jr7krum2m8dq34khvkevr88cc';
-const RECIPIENTS_PER_BATCH = 90;
 const NEXT_BATCH_RETRY_DELAY_MS = 2500;
 const NEXT_BATCH_MAX_RETRIES = 24;
 
@@ -87,6 +86,10 @@ interface TransactionReview {
   grandTotalSompi: string;
   mass: number;
   maximumMass: number;
+  computeMass?: number;
+  storageMass?: number;
+  maximumComputeMass?: number;
+  maximumStorageMass?: number;
   inputOutpoints: Array<{ transactionId: string; index: number }>;
 }
 
@@ -150,6 +153,7 @@ export default function DistroApp() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [review, setReview] = useState<BatchReview | null>(null);
   const [transactionError, setTransactionError] = useState('');
+  const [completedTxIds, setCompletedTxIds] = useState<string[]>([]);
   const [tokenIdentifier, setTokenIdentifier] = useState('');
   const [kasPerHolder, setKasPerHolder] = useState('');
   const [holderImportLoading, setHolderImportLoading] = useState(false);
@@ -200,6 +204,7 @@ export default function DistroApp() {
     setServiceFeeStatus({ status: 'pending', txId: '' });
     setReview(null);
     setTransactionError('');
+    setCompletedTxIds([]);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -333,10 +338,53 @@ export default function DistroApp() {
     }
 
     if (!response.ok) {
-      throw new Error(body?.error || `Could not prepare transaction (HTTP ${response.status}).`);
+      const error = new Error(body?.error || `Could not prepare transaction (HTTP ${response.status}).`);
+      (error as Error & { code?: string }).code = body?.code;
+      throw error;
     }
 
     return body;
+  };
+
+  const buildLargestSafeReview = async (
+    recipientStart: number,
+    excludedOutpoints: Array<{ transactionId: string; index: number }> = [],
+  ) => {
+    const remainingCount = recipients.length - recipientStart;
+    if (remainingCount <= 0) throw new Error('No unsent recipients remain.');
+
+    const buildCount = (count: number) => buildDispersalReview(
+      recipients.slice(recipientStart, recipientStart + count),
+      excludedOutpoints,
+    );
+
+    try {
+      const nextReview = await buildCount(remainingCount);
+      return { review: nextReview, recipientCount: remainingCount };
+    } catch (err) {
+      if ((err as Error & { code?: string })?.code !== 'MASS_LIMIT_EXCEEDED') throw err;
+    }
+
+    let low = 1;
+    let high = remainingCount - 1;
+    let best: { review: TransactionReview; recipientCount: number } | null = null;
+
+    while (low <= high) {
+      const candidateCount = Math.floor((low + high) / 2);
+      try {
+        const nextReview = await buildCount(candidateCount);
+        best = { review: nextReview, recipientCount: candidateCount };
+        low = candidateCount + 1;
+      } catch (err) {
+        if ((err as Error & { code?: string })?.code !== 'MASS_LIMIT_EXCEEDED') throw err;
+        high = candidateCount - 1;
+      }
+    }
+
+    if (!best) {
+      throw new Error('Even one recipient exceeds the Kaspa transaction mass limit with the wallet’s current UTXOs.');
+    }
+    return best;
   };
 
   const handlePrepareReview = async () => {
@@ -352,14 +400,15 @@ export default function DistroApp() {
     try {
       const firstUnsent = statuses.findIndex(status => status.status !== 'sent');
       const recipientStart = firstUnsent === -1 ? 0 : firstUnsent;
-      const batchRecipients = recipients.slice(recipientStart, recipientStart + RECIPIENTS_PER_BATCH);
-      const nextReview = await buildDispersalReview(batchRecipients);
+      const { review: nextReview, recipientCount } = await buildLargestSafeReview(recipientStart);
       setReview({
         ...nextReview,
-        batchNumber: Math.floor(recipientStart / RECIPIENTS_PER_BATCH) + 1,
-        batchCount: Math.ceil(recipients.length / RECIPIENTS_PER_BATCH),
+        batchNumber: statuses.filter(status => status.status === 'sent').length > 0
+          ? completedTxIds.length + 1
+          : 1,
+        batchCount: completedTxIds.length + Math.ceil((recipients.length - recipientStart) / recipientCount),
         recipientStart,
-        recipientCount: batchRecipients.length,
+        recipientCount,
       });
     } catch (err: any) {
       setTransactionError(err?.message ?? 'Could not prepare transaction.');
@@ -400,6 +449,12 @@ export default function DistroApp() {
         lastTxId = typeof pushed === 'string'
           ? (() => { try { return JSON.parse(pushed)?.id ?? pushed; } catch { return pushed; } })()
           : (pushed?.id ?? pushed?.txId ?? '');
+        if (!lastTxId) {
+          throw new Error('KasWare submitted the transaction but did not return a transaction ID.');
+        }
+        setCompletedTxIds(previous => (
+          previous.includes(lastTxId) ? previous : [...previous, lastTxId]
+        ));
         setStatuses(previous => previous.map((status, index) =>
           index >= recipientStart && index < recipientStart + recipientCount
             ? { status: 'sent', txId: lastTxId }
@@ -409,30 +464,31 @@ export default function DistroApp() {
         recipientStart += recipientCount;
         if (recipientStart >= recipients.length) break;
 
-        const nextRecipients = recipients.slice(recipientStart, recipientStart + RECIPIENTS_PER_BATCH);
-        let nextReview: TransactionReview | null = null;
+        let nextBatch: { review: TransactionReview; recipientCount: number } | null = null;
         let lastError: any = null;
         for (let attempt = 0; attempt < NEXT_BATCH_MAX_RETRIES; attempt += 1) {
           await new Promise(resolve => window.setTimeout(resolve, NEXT_BATCH_RETRY_DELAY_MS));
           try {
-            nextReview = await buildDispersalReview(nextRecipients, excludedOutpoints);
+            nextBatch = await buildLargestSafeReview(recipientStart, excludedOutpoints);
             break;
           } catch (err) {
             lastError = err;
           }
         }
-        if (!nextReview) {
+        if (!nextBatch) {
           throw new Error(
-            `Batch ${Math.floor(recipientStart / RECIPIENTS_PER_BATCH) + 1} could not be prepared after waiting for the previous transaction. ${lastError?.message ?? ''}`.trim(),
+            `Batch ${currentReview.batchNumber + 1} could not be prepared after waiting for the previous transaction. ${lastError?.message ?? ''}`.trim(),
           );
         }
+        const { review: nextReview, recipientCount: nextRecipientCount } = nextBatch;
         excludedOutpoints.push(...nextReview.inputOutpoints);
+        const nextBatchNumber = currentReview.batchNumber + 1;
         currentReview = {
           ...nextReview,
-          batchNumber: Math.floor(recipientStart / RECIPIENTS_PER_BATCH) + 1,
-          batchCount: Math.ceil(recipients.length / RECIPIENTS_PER_BATCH),
+          batchNumber: nextBatchNumber,
+          batchCount: nextBatchNumber - 1 + Math.ceil((recipients.length - recipientStart) / nextRecipientCount),
           recipientStart,
-          recipientCount: nextRecipients.length,
+          recipientCount: nextRecipientCount,
         };
       }
 
@@ -479,7 +535,7 @@ export default function DistroApp() {
               <div className="flex items-center justify-between mb-6">
                 <label className="text-sm font-semibold tracking-wide text-white/90 flex items-center gap-2 uppercase">
                   <Fingerprint className="h-4 w-4 text-primary" />
-                   90 Wallets per Mass-Safe Batch
+                   Dynamic Mass-Safe Batching
                 </label>
                 <div>
                   <input type="file" accept=".csv,.txt" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
@@ -523,7 +579,7 @@ export default function DistroApp() {
                   </button>
                 </div>
                 <div className="mt-2 text-[10px] leading-relaxed text-white/35">
-                  KRC-20 uses its ticker. KCC-20 uses the 64-character token ID. Complete holder lists are imported only when the indexer exposes every holder.
+                  Kaspa L1 KRC-20 uses its ticker, not a 0x contract address. KCC-20 uses the 64-character token ID. Complete holder lists are imported only when the indexer exposes every holder.
                 </div>
                 {holderImportError && (
                   <div className="mt-3 flex items-start gap-2 text-xs text-destructive">
@@ -644,7 +700,7 @@ export default function DistroApp() {
                       <Zap className="h-3.5 w-3.5" /> Review Transaction
                     </div>
                     <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/50">
-                      <span>Batch {review.batchNumber} of {review.batchCount}</span>
+                      <span>Batch {review.batchNumber} of ~{review.batchCount}</span>
                       <span>{review.recipientCount} recipients</span>
                     </div>
                     <div className="space-y-2 font-mono text-[11px]">
@@ -657,7 +713,14 @@ export default function DistroApp() {
                       <span>{sompiToKas(review.grandTotalSompi)} KAS</span>
                     </div>
                     <div className="text-[9px] text-white/30 uppercase tracking-widest flex justify-between font-mono">
-                      <span>Mass: {review.mass.toLocaleString()} / {review.maximumMass.toLocaleString()}</span>
+                      <span>
+                        Compute: {(review.computeMass ?? review.mass).toLocaleString()} / {(review.maximumComputeMass ?? review.maximumMass).toLocaleString()}
+                      </span>
+                      {review.storageMass != null && (
+                        <span>
+                          Storage: {review.storageMass.toLocaleString()} / {(review.maximumStorageMass ?? 500000).toLocaleString()}
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
@@ -665,6 +728,38 @@ export default function DistroApp() {
                 {transactionError && (
                   <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-4 text-xs text-destructive/90 backdrop-blur-sm leading-relaxed">
                     {transactionError}
+                  </div>
+                )}
+
+                {completedTxIds.length > 0 && (
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="rounded-xl bg-primary/10 border border-primary/30 p-4 text-xs shadow-[0_0_15px_rgba(11,213,188,0.1)_inset]"
+                  >
+                    <div className="flex items-center gap-2 font-bold text-primary uppercase tracking-wider">
+                      <CheckCircle2 className="h-4 w-4 shrink-0" />
+                      {completedTxIds.length === 1
+                        ? 'Transaction complete on Kaspa'
+                        : `${completedTxIds.length} transactions complete on Kaspa`}
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {completedTxIds.map((txId, index) => (
+                        <a
+                          key={txId}
+                          href={`https://explorer.kaspa.org/txs/${txId}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-between gap-3 rounded-lg border border-primary/20 bg-black/20 px-3 py-2 font-mono text-[10px] text-primary transition-colors hover:border-primary/50 hover:bg-primary/10"
+                        >
+                          <span className="truncate">
+                            {completedTxIds.length > 1 ? `Batch ${index + 1}: ` : ''}
+                            {txId}
+                          </span>
+                          <ExternalLink className="h-3 w-3 shrink-0" />
+                        </a>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -675,7 +770,7 @@ export default function DistroApp() {
                   <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                   <span className="font-semibold tracking-wide">
                     {isFeeSigning
-                      ? `APPROVING BATCH ${review?.batchNumber ?? 1} OF ${review?.batchCount ?? Math.ceil(recipients.length / RECIPIENTS_PER_BATCH)}...`
+                      ? `APPROVING DYNAMIC BATCH ${review?.batchNumber ?? 1}...`
                       : `SIGNING ${recipients.length} RECIPIENTS...`}
                   </span>
                 </div>
@@ -806,17 +901,16 @@ export default function DistroApp() {
                     <><Loader2 className="h-5 w-5 animate-spin" /> {review ? 'AWAITING KASWARE...' : 'PREPARING TX...'}</>
                   ) : (
                     <><Send className="h-4 w-4" /> {review
-                      ? `APPROVE ${review.batchCount - review.batchNumber + 1} BATCH${review.batchCount - review.batchNumber + 1 === 1 ? '' : 'ES'}`
-                      : `REVIEW ${Math.ceil(recipients.length / RECIPIENTS_PER_BATCH)} TRANSACTION${Math.ceil(recipients.length / RECIPIENTS_PER_BATCH) === 1 ? '' : 'S'}`}
+                      ? `APPROVE DYNAMIC BATCH ${review.batchNumber}`
+                      : 'REVIEW DYNAMIC BATCHES'}
                     </>
                   )}
                 </button>
 
                 {recipients.length > 0 && !isProcessing && (
                   <p className="text-[10px] text-white/30 text-center mt-4 uppercase tracking-widest font-mono">
-                    {Math.ceil(recipients.length / RECIPIENTS_PER_BATCH) === 1
-                      ? <>All outputs signed in <span className="text-white/60 font-bold">one approval</span></>
-                      : <><span className="text-white/60 font-bold">{Math.ceil(recipients.length / RECIPIENTS_PER_BATCH)} mass-safe transactions</span> • wallet approval required for each</>}
+                    <span className="text-white/60 font-bold">Batch size calculated from live transaction mass</span>
+                    {' '}• wallet approval required for each
                   </p>
                 )}
               </div>
