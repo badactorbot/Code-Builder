@@ -50,3 +50,9 @@ All token-holder imports must exclude Kaspa's canonical burn address, regardless
 **Why:** The burn balance is permanently inaccessible and must never become a native-KAS distribution recipient; the user confirmed this behavior works as intended.
 
 **How to apply:** Apply the exclusion before completeness comparisons and recipient deduplication for KRON, KCC-20, and KRC-20 imports.
+
+Kasplex KRC-20 operation replay must treat accepted `send` events as completed ownership transfers, just like `transfer`; `list` events do not change ownership.
+
+**Why:** Replaying mint and transfer alone produced 115 positive DAGAS balances while Kasplex reported 118. Including `send` reconciled exactly to 118.
+
+**How to apply:** Apply mint as a recipient credit, transfer/send as sender debit plus recipient credit, burn as sender debit, and ignore list for holder balances. Commit each history page and its cursor atomically.

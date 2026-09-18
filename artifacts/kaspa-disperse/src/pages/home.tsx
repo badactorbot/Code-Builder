@@ -112,6 +112,19 @@ interface HolderImportResult {
   excludedBurnAddresses?: number;
 }
 
+interface HolderIndexingStatus {
+  protocol: 'KRC-20';
+  identifier: string;
+  indexing: true;
+  status: 'queued' | 'indexing' | 'failed';
+  processedOperations: number;
+  totalOperations?: number | null;
+  expectedHolders?: number | null;
+  retryAfterMs?: number;
+  message?: string;
+  error?: string;
+}
+
 function errorMessage(value: unknown, fallback: string): string {
   if (typeof value === 'string' && value.trim()) return value;
   if (
@@ -167,8 +180,16 @@ export default function Home() {
   const [holderImportLoading, setHolderImportLoading] = useState(false);
   const [holderImportError, setHolderImportError] = useState('');
   const [holderImportResult, setHolderImportResult] = useState<HolderImportResult | null>(null);
+  const [holderIndexingStatus, setHolderIndexingStatus] = useState<HolderIndexingStatus | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const holderImportAbortRef = useRef<AbortController | null>(null);
+  const holderImportTimerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    holderImportAbortRef.current?.abort();
+    if (holderImportTimerRef.current !== null) window.clearTimeout(holderImportTimerRef.current);
+  }, []);
 
   // Detect installed wallets
   useEffect(() => {
@@ -226,8 +247,14 @@ export default function Home() {
   const handleImportTokenHolders = async () => {
     const identifier = tokenIdentifier.trim();
     const amount = Number(kasPerHolder);
+    holderImportAbortRef.current?.abort();
+    if (holderImportTimerRef.current !== null) {
+      window.clearTimeout(holderImportTimerRef.current);
+      holderImportTimerRef.current = null;
+    }
     setHolderImportError('');
     setHolderImportResult(null);
+    setHolderIndexingStatus(null);
 
     if (!identifier) {
       setHolderImportError('Enter a KRC-20 ticker or KCC-20 token ID.');
@@ -239,27 +266,59 @@ export default function Home() {
     }
 
     setHolderImportLoading(true);
+    const abortController = new AbortController();
+    holderImportAbortRef.current = abortController;
     try {
-      const response = await fetch(
-        `${resolveApiBase()}/api/kron/token-holders/${encodeURIComponent(identifier)}`,
-        { headers: { Accept: 'application/json' }, cache: 'no-store' },
-      );
-      const bodyText = await response.text();
-      let body: HolderImportResult & { error?: unknown };
-      try {
-        body = JSON.parse(bodyText);
-      } catch {
-        throw new Error(`Holder service returned an invalid response (HTTP ${response.status}).`);
-      }
-      if (!response.ok) throw new Error(errorMessage(body.error, 'Could not load token holders.'));
-      if (!body.addresses?.length) throw new Error('No eligible Kaspa holder addresses were found.');
+      const endpoint = `${resolveApiBase()}/api/kron/token-holders/${encodeURIComponent(identifier)}`;
+      while (true) {
+        const response = await fetch(endpoint, {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+          signal: abortController.signal,
+        });
+        const bodyText = await response.text();
+        let body: (HolderImportResult & { error?: unknown }) | HolderIndexingStatus;
+        try {
+          body = JSON.parse(bodyText);
+        } catch {
+          throw new Error(`Holder service returned an invalid response (HTTP ${response.status}).`);
+        }
 
-      handleParseInput(body.addresses.map(address => `${address} ${kasPerHolder}`).join('\n'));
-      setHolderImportResult(body);
+        if (response.status === 202 && 'indexing' in body && body.indexing) {
+          setHolderIndexingStatus(body);
+          if (body.status === 'failed') {
+            throw new Error(errorMessage(body.error || body.message, 'Holder indexing failed.'));
+          }
+          await new Promise<void>((resolve, reject) => {
+            const timer = window.setTimeout(resolve, body.retryAfterMs ?? 2000);
+            holderImportTimerRef.current = timer;
+            const onAbort = () => {
+              window.clearTimeout(timer);
+              reject(new DOMException('Holder import was cancelled.', 'AbortError'));
+            };
+            abortController.signal.addEventListener('abort', onAbort, { once: true });
+          });
+          holderImportTimerRef.current = null;
+          continue;
+        }
+
+        if (!response.ok) throw new Error(errorMessage(body.error, 'Could not load token holders.'));
+        const completed = body as HolderImportResult;
+        if (!completed.addresses?.length) throw new Error('No eligible Kaspa holder addresses were found.');
+
+        // Only a reconciled 200 response may enter the recipient editor.
+        handleParseInput(completed.addresses.map(address => `${address} ${kasPerHolder}`).join('\n'));
+        setHolderImportResult(completed);
+        setHolderIndexingStatus(null);
+        break;
+      }
     } catch (err: any) {
-      setHolderImportError(err?.message || 'Could not load token holders.');
+      if (err?.name !== 'AbortError') setHolderImportError(err?.message || 'Could not load token holders.');
     } finally {
-      setHolderImportLoading(false);
+      if (holderImportAbortRef.current === abortController) {
+        holderImportAbortRef.current = null;
+        setHolderImportLoading(false);
+      }
     }
   };
 
@@ -423,6 +482,17 @@ export default function Home() {
     setIsProcessing(true);
     setTransactionError('');
     try {
+      if (typeof account.provider?.getAccounts === 'function') {
+        const liveAccounts = await account.provider.getAccounts();
+        const liveAddress = typeof liveAccounts?.[0] === 'string'
+          ? liveAccounts[0]
+          : liveAccounts?.[0]?.address;
+        if (!liveAddress || liveAddress !== account.address) {
+          throw new Error(
+            'The active KasWare account changed after this transaction was prepared. Reconnect the wallet and prepare a new review before signing.',
+          );
+        }
+      }
       let currentReview = review;
       let recipientStart = review.recipientStart;
       let lastTxId = '';
@@ -558,7 +628,7 @@ export default function Home() {
                   <input
                     value={tokenIdentifier}
                     onChange={(event) => setTokenIdentifier(event.target.value)}
-                    placeholder="KRC-20 ticker or KCC-20 token ID"
+                    placeholder="Layer 1 KRC-20 ticker or KCC-20 ID"
                     className="min-w-0 rounded-lg border border-white/10 bg-[#02050a] px-3 py-2.5 font-mono text-xs text-white placeholder:text-white/30 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
                   />
                   <input
@@ -580,8 +650,44 @@ export default function Home() {
                   </button>
                 </div>
                 <div className="mt-2 text-[10px] leading-relaxed text-white/35">
-                  Kaspa L1 KRC-20 uses its ticker, not a 0x contract address. KCC-20 uses the 64-character token ID. Complete holder lists are imported only when the indexer exposes every holder.
+                   Layer 1 KRC-20 imports use the ticker only (not a 0x contract address). KCC-20 imports use the supported 64-character token ID. Complete holder lists are imported only after every holder is indexed and reconciled.
                 </div>
+                {holderIndexingStatus && (
+                  <div
+                    className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-white/70"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <div className="flex items-center gap-2 text-primary">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span className="font-semibold">
+                        {holderIndexingStatus.status === 'queued' ? 'Queued for complete indexing' : 'Indexing complete holder history'}
+                      </span>
+                    </div>
+                    <div className="mt-1">
+                      Processed {holderIndexingStatus.processedOperations.toLocaleString()} operations
+                      {holderIndexingStatus.totalOperations
+                        ? ` of ${holderIndexingStatus.totalOperations.toLocaleString()}`
+                        : ''}
+                      {holderIndexingStatus.expectedHolders
+                        ? ` · ${holderIndexingStatus.expectedHolders.toLocaleString()} holders expected`
+                        : ''}
+                    </div>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{
+                          width: holderIndexingStatus.totalOperations
+                            ? `${Math.min(100, (holderIndexingStatus.processedOperations / holderIndexingStatus.totalOperations) * 100)}%`
+                            : '12%',
+                        }}
+                      />
+                    </div>
+                    <div className="mt-1 text-[10px] text-white/40">
+                      No partial addresses are loaded until indexing finishes and the holder count reconciles.
+                    </div>
+                  </div>
+                )}
                 {holderImportError && (
                   <div className="mt-3 flex items-start gap-2 text-xs text-destructive">
                     <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -598,6 +704,7 @@ export default function Home() {
                     {holderImportResult.excludedBurnAddresses
                       ? ` (${holderImportResult.excludedBurnAddresses} burn address excluded)`
                       : ''}
+                    {holderImportResult.source ? ` · Source: ${holderImportResult.source}` : ''}
                     .
                   </div>
                 )}

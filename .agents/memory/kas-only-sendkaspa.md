@@ -30,3 +30,9 @@ Batch size must be derived from the complete live transaction mass, not a fixed 
 **Why:** Larger payments can select more UTXOs, increasing input mass even when recipient count is unchanged; a fixed wallet count can therefore pass for one wallet state and fail for another.
 
 **How to apply:** Find the largest safe recipient slice using actual UTXOs, outputs, change, and fees; rebuild and recalculate after each confirmed batch because the spendable UTXO set changes.
+
+Kaspa's transaction-mass API must receive placeholder signature scripts matching the final signed input size when estimating an unsigned PSKT.
+
+**Why:** Sending empty signature scripts underestimated a one-input transaction by exactly 66 compute-mass units, producing a relay fee 6,600 sompi below the node's standardness requirement.
+
+**How to apply:** Model each KasWare Schnorr input with a 66-byte signature script during authoritative mass calculation, while keeping the actual PSKT input unsigned for wallet signing.
