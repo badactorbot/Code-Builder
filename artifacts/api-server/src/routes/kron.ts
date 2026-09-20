@@ -447,6 +447,7 @@ router.get('/token-holders/:identifier', async (req, res) => {
       totalHolders: Number.isFinite(total) ? total : null,
       excludedBurnAddresses,
     });
+    });
   } catch (err: any) {
     res.status(502).json({
       error: 'Token holder indexer is currently unavailable.',

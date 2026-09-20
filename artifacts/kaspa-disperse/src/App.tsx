@@ -4,7 +4,9 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import Home from '@/pages/home';
-import Dispenser from '@/pages/dispenser';
+import DistroApp from '@/pages/distro-app';
+import Kaspaper from '@/pages/kaspaper';
+import VolumeBot from '@/pages/volume-bot';
 import NotFound from '@/pages/not-found';
 import {
   Route,
@@ -20,7 +22,10 @@ function Router() {
     <RoutedErrorBoundary>
       <Switch>
         <Route path="/" component={Home} />
-        <Route path="/dispenser" component={Dispenser} />
+        <Route path="/kaspaper" component={Kaspaper} />
+        <Route path="/volume-bot" component={VolumeBot} />
+        <Route path="/dispenser" component={DistroApp} />
+        <Route path="/distro" component={DistroApp} />
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>
