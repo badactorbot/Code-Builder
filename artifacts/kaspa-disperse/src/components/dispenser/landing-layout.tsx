@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react';
 import { Home } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
+import { InductionNavButton } from '@/components/ui/induction-nav-button';
 import KineticGrid from '@/components/ui/kinetic-grid';
 import { KRON_CHART_URL } from '@/lib/dispenser/constants';
 
@@ -139,9 +140,9 @@ export function LandingLayout({
                 href={KRON_CHART_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="kd-cta-buy hidden sm:inline-flex items-center justify-center whitespace-nowrap rounded-xl px-4 py-3 text-sm font-bold uppercase tracking-wide"
+                className="hidden sm:block shrink-0 rounded-[18px] transition-transform duration-200 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
               >
-                Buy KDIST
+                <InductionNavButton label="BUY KDIST" className="h-14 w-[12.25rem]" />
               </a>
             </div>
           </div>
