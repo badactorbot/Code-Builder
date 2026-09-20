@@ -104,7 +104,7 @@ export function LandingLayout({
             {showHome ? (
               <Link
                 href="/"
-                className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/70 hover:bg-cyan-500/20 hover:text-white"
+                className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-cyan-500/30 bg-cyan-500/5 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-500/10 hover:text-white"
               >
                 <Home className="h-4 w-4" />
                 Home
@@ -125,13 +125,13 @@ export function LandingLayout({
               <SocialLinks size="lg" />
               <NavAnchor
                 href="/volume-bot"
-                className="inline-flex items-center justify-center whitespace-nowrap rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/70 hover:bg-cyan-500/20 hover:text-white"
+                className="kd-cta-bot inline-flex items-center justify-center whitespace-nowrap rounded-xl px-4 py-3 text-sm font-bold tracking-wide"
               >
                 Volume Bot
               </NavAnchor>
               <NavAnchor
                 href="/distro"
-                className="kd-btn inline-flex items-center justify-center whitespace-nowrap text-black font-bold text-sm px-5 py-3 rounded-xl uppercase tracking-wide shadow-[0_0_28px_rgba(34,211,238,0.55)]"
+                className="kd-btn inline-flex items-center justify-center whitespace-nowrap text-black font-bold text-sm px-5 py-3 rounded-xl uppercase tracking-wide"
               >
                 Open Kasdistro
               </NavAnchor>
@@ -139,9 +139,9 @@ export function LandingLayout({
                 href={KRON_CHART_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hidden sm:inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/70 hover:bg-cyan-500/20 hover:text-white"
+                className="kd-cta-buy hidden sm:inline-flex items-center justify-center whitespace-nowrap rounded-xl px-4 py-3 text-sm font-bold uppercase tracking-wide"
               >
-                BUY KDIST
+                Buy KDIST
               </a>
             </div>
           </div>
