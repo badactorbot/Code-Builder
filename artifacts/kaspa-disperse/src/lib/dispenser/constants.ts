@@ -1,3 +1,6 @@
+export const VOLUME_BOT_URL =
+  'https://kcc-20-kron-trading-bot.replit.app/volume-bot';
+
 export const SERVICE_FEE_KAS = 100;
 export const SERVICE_FEE_ADDRESS =
   'kaspa:qz6dltvkds80wf8raac504ze4nesgnk72n24jr7krum2m8dq34khvkevr88cc';
