@@ -44,11 +44,8 @@ export default function VolumeBot() {
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-400">
-              Volume Bot
-            </p>
-            <h1 className="mt-2 text-2xl font-bold text-white sm:text-3xl">
-              KasDistro Trading Bot Console
+            <h1 className="text-2xl font-bold text-white sm:text-3xl">
+              KasDistro Volume Bot Console
             </h1>
             <p className="mt-2 text-sm text-cyan-200">
               Connect Kasware, set a token, activate, then run cycles from this page.
