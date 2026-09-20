@@ -6,6 +6,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import Home from '@/pages/home';
 import DistroApp from '@/pages/distro-app';
 import Kaspaper from '@/pages/kaspaper';
+import VolumeBot from '@/pages/volume-bot';
 import NotFound from '@/pages/not-found';
 import {
   Route,
@@ -22,6 +23,7 @@ function Router() {
       <Switch>
         <Route path="/" component={Home} />
         <Route path="/kaspaper" component={Kaspaper} />
+        <Route path="/volume-bot" component={VolumeBot} />
         <Route path="/dispenser" component={DistroApp} />
         <Route path="/distro" component={DistroApp} />
         <Route component={NotFound} />

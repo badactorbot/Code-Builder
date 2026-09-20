@@ -124,6 +124,12 @@ export function LandingLayout({
             <div className="ml-auto flex items-center gap-3">
               <SocialLinks size="lg" />
               <NavAnchor
+                href="/volume-bot"
+                className="inline-flex items-center justify-center whitespace-nowrap rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/70 hover:bg-cyan-500/20 hover:text-white"
+              >
+                Volume Bot
+              </NavAnchor>
+              <NavAnchor
                 href="/distro"
                 className="kd-btn inline-flex items-center justify-center whitespace-nowrap text-black font-bold text-sm px-5 py-3 rounded-xl uppercase tracking-wide shadow-[0_0_28px_rgba(34,211,238,0.55)]"
               >
@@ -155,6 +161,7 @@ export function LandingLayout({
               <NavAnchor href="/#token-distribution" className="hover:text-cyan-100">Token Distribution</NavAnchor>
               <NavAnchor href="/#holder-rewards" className="hover:text-cyan-100">Holder Rewards</NavAnchor>
               <NavAnchor href="/kaspaper" className="hover:text-cyan-100">Kaspaper</NavAnchor>
+              <NavAnchor href="/volume-bot" className="hover:text-cyan-100">Volume Bot</NavAnchor>
             </div>
             <SocialLinks />
           </div>
