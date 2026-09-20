@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react';
-import { Shield, Layers, Wallet } from 'lucide-react';
+import { Activity, Layers, Shield, Timer, Wallet } from 'lucide-react';
 import { LandingLayout } from '@/components/dispenser/landing-layout';
 import { DispenserLogo } from '@/components/dispenser/brand-logo';
 import { SERVICE_FEE_ADDRESS } from '@/lib/dispenser/constants';
@@ -86,19 +86,105 @@ const ROADMAP = [
   },
 ];
 
+const VOLUME_SPECS = [
+  { icon: Activity, label: 'Fixed Trade Size', value: '21 KAS', detail: 'Exact buy and sell size' },
+  { icon: Layers, label: 'Execution Cycle', value: '5 in / 5 out', detail: 'Consecutive buys then sells' },
+  { icon: Timer, label: 'Timing Interval', value: '6 minutes', detail: 'Between each sequential trade' },
+];
+
+const VOLUME_WORKFLOW = [
+  'Project team connects their designated KasWare-compatible deployment wallet.',
+  'The user inputs the target KCC-20 token identifier to apply the standard volume model (21 KAS trades, 6-minute intervals).',
+  'The system initiates the one-time activation transaction of 100 KAS.',
+  'Upon on-chain confirmation of the activation fee, the bot initializes its 5-buy / 5-sell cycle engine.',
+  'Autonomous volume generation commences securely under the preset deterministic parameters.',
+];
+
+const VOLUME_SECURITY = [
+  {
+    title: 'Non-Custodial Execution',
+    body: 'KasVolume never takes custody of primary token reserves or private keys; trading bots operate via dedicated sub-wallets funded by the project.',
+  },
+  {
+    title: 'Deterministic Rhythms',
+    body: 'Fixed 21 KAS sizing and strict 6-minute spacing ensure predictable, audit-friendly automated operations.',
+  },
+  {
+    title: 'Slippage & Drawdown Guardrails',
+    body: 'Automated circuit breakers pause trading if token price volatility exceeds preset thresholds.',
+  },
+  {
+    title: 'Transparent Activation',
+    body: 'The single 100 KAS activation fee is verified on-chain instantly, with zero recurring subscription fees.',
+  },
+];
+
+const CYCLE_ROWS = [
+  ['Phase A (Buys)', '5 Buys In', '21 KAS', '6 minutes apart'],
+  ['Phase B (Sells)', '5 Sells Out', '21 KAS', '6 minutes apart'],
+];
+
+const VOLUME_LAUNCH_ROWS = [
+  ['1 Project Bot', '100 KAS', 'One-time per launch', '100 KAS'],
+  ['10 Project Bots', '100 KAS', 'One-time per launch', '1,000 KAS'],
+  ['50 Project Bots', '100 KAS', 'One-time per launch', '5,000 KAS'],
+  ['100 Project Bots', '100 KAS', 'One-time per launch', '10,000 KAS'],
+];
+
+const VOLUME_MONTHLY_ROWS = [
+  ['10 Launches', '100 KAS', '1,000 KAS'],
+  ['25 Launches', '100 KAS', '2,500 KAS'],
+  ['50 Launches', '100 KAS', '5,000 KAS'],
+  ['100 Launches', '100 KAS', '10,000 KAS'],
+  ['250 Launches', '100 KAS', '25,000 KAS'],
+];
+
+const VOLUME_ROADMAP = [
+  {
+    phase: '01',
+    title: 'Core Engine',
+    body: 'KCC-20 volume bot engine with the standard 21 KAS / 6-minute cycle and 100 KAS single-fee deployment.',
+  },
+  {
+    phase: '02',
+    title: 'Pool Expansion',
+    body: 'Advanced gas optimization and multi-pool support.',
+  },
+  {
+    phase: '03',
+    title: 'Live Analytics',
+    body: 'Real-time volume analytics dashboard and Telegram/Discord webhook alerts.',
+  },
+  {
+    phase: '04',
+    title: 'Enterprise Suites',
+    body: 'Enterprise multi-token market-making suites and institutional API access.',
+  },
+  {
+    phase: '05',
+    title: 'Governance',
+    body: 'Decentralized bot-operator staking and governance integration.',
+  },
+];
+
+type PaperTone = 'cyan' | 'violet';
+
 function Section({
   num,
   title,
   children,
+  tone = 'cyan',
 }: {
   num: string;
   title: string;
   children: ReactNode;
+  tone?: PaperTone;
 }) {
+  const numClass = tone === 'violet' ? 'text-violet-300' : 'text-cyan-400';
   return (
     <section className="scroll-mt-28">
       <div className="mb-6 flex items-baseline gap-4">
-        <span className="font-mono text-sm font-bold text-cyan-400">{num}</span>
+        <span className={`font-mono text-sm font-bold ${numClass}`}>{num}</span>
         <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">{title}</h2>
       </div>
       <div className="space-y-5 text-base leading-relaxed text-zinc-400">{children}</div>
@@ -109,19 +195,33 @@ function Section({
 function PaperTable({
   headers,
   rows,
+  tone = 'cyan',
 }: {
   headers: string[];
   rows: string[][];
+  tone?: PaperTone;
 }) {
+  const shell =
+    tone === 'violet'
+      ? 'border-violet-500/25'
+      : 'border-cyan-900/30';
+  const head =
+    tone === 'violet'
+      ? 'border-b border-violet-500/25 bg-violet-500/10'
+      : 'border-b border-cyan-900/30 bg-cyan-500/5';
+  const headText = tone === 'violet' ? 'text-violet-200' : 'text-cyan-300';
+  const rowBorder =
+    tone === 'violet' ? 'border-b border-violet-500/15 last:border-0' : 'border-b border-cyan-900/15 last:border-0';
+
   return (
-    <div className="overflow-x-auto rounded-2xl border border-cyan-900/30">
+    <div className={`overflow-x-auto rounded-2xl border ${shell}`}>
       <table className="w-full min-w-[520px] text-left text-sm">
         <thead>
-          <tr className="border-b border-cyan-900/30 bg-cyan-500/5">
+          <tr className={head}>
             {headers.map((header) => (
               <th
                 key={header}
-                className="px-4 py-3 font-semibold uppercase tracking-wider text-cyan-300"
+                className={`px-4 py-3 font-semibold uppercase tracking-wider ${headText}`}
               >
                 {header}
               </th>
@@ -130,7 +230,7 @@ function PaperTable({
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.join('-')} className="border-b border-cyan-900/15 last:border-0">
+            <tr key={row.join('-')} className={rowBorder}>
               {row.map((cell, index) => (
                 <td
                   key={`${row[0]}-${index}`}
@@ -150,8 +250,23 @@ function PaperTable({
 export default function Kaspaper() {
   return (
     <LandingLayout showGrid={false}>
-      <article className="relative">
-        <header className="px-4 sm:px-6 pt-16 sm:pt-24 pb-14 text-center">
+      <div className="sticky top-20 z-40 flex justify-center gap-3 border-b border-white/5 bg-[#060a0e]/80 px-4 py-3 backdrop-blur-xl">
+        <a
+          href="#kasdistro"
+          className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-200 hover:bg-cyan-500/20"
+        >
+          Distro Paper
+        </a>
+        <a
+          href="#kasvolume"
+          className="rounded-full border border-violet-500/35 bg-violet-500/10 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-violet-200 hover:bg-violet-500/20"
+        >
+          Volume Paper
+        </a>
+      </div>
+
+      <article id="kasdistro" className="relative scroll-mt-40">
+        <header className="px-4 sm:px-6 pt-12 sm:pt-20 pb-14 text-center">
           <DispenserLogo size="lg" className="mx-auto mb-8" />
           <p className="mb-5 text-xs font-semibold uppercase tracking-[0.32em] text-cyan-300/90">
             KasDistro Protocol · White Paper v1.0
@@ -308,6 +423,176 @@ export default function Kaspaper() {
               or legal advice. Revenue illustrations are hypothetical.
             </p>
           </Section>
+        </div>
+      </article>
+
+      <article
+        id="kasvolume"
+        className="relative scroll-mt-40 border-t border-violet-500/20"
+      >
+        <header className="px-4 sm:px-6 pt-16 sm:pt-24 pb-14 text-center">
+          <p className="mb-5 text-xs font-semibold uppercase tracking-[0.32em] text-violet-300/90">
+            KasVolume Protocol · White Paper v1.1
+          </p>
+          <h1 className="mx-auto max-w-3xl text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1] text-white">
+            Enterprise-Grade KCC-20{' '}
+            <span className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-cyan-300 bg-clip-text text-transparent">
+              Volume Trading Bot
+            </span>
+          </h1>
+          <p className="mx-auto mt-6 max-w-2xl text-lg text-zinc-400">
+            Automated market liquidity and volume generation. Non-custodial trading
+            infrastructure. September 2026.
+          </p>
+        </header>
+
+        <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 sm:py-16 space-y-20">
+              <Section tone="violet" num="01" title="Executive Summary">
+                <p>
+                  KasVolume is a specialized, automated volume-trading and market-liquidity bot
+                  engineered specifically for KCC-20 tokens within the Kaspa ecosystem. It
+                  empowers project founders, token creators, and market makers to maintain
+                  healthy market liquidity, consistent trading activity, and algorithmic price
+                  discovery without manual intervention.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {VOLUME_SPECS.map(({ icon: Icon, label, value, detail }) => (
+                    <div
+                      key={label}
+                      className="rounded-2xl border border-violet-500/25 bg-violet-500/10 p-5"
+                    >
+                      <Icon className="mb-3 h-5 w-5 text-violet-300" />
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-200/80">
+                        {label}
+                      </p>
+                      <p className="mt-2 text-xl font-bold text-white">{value}</p>
+                      <p className="mt-1 text-xs text-zinc-400">{detail}</p>
+                    </div>
+                  ))}
+                </div>
+                <p>
+                  Each project bot deployment is initiated via a one-time activation fee of
+                  exactly 100 KAS, paid directly upon setup. Once launched, the trading bot
+                  operates continuously according to the deterministic cycle profile.
+                </p>
+                <div className="rounded-2xl border border-violet-400/30 bg-gradient-to-r from-violet-500/15 to-fuchsia-500/10 p-6">
+                  <p className="text-sm font-medium leading-relaxed text-violet-100">
+                    KasVolume revenue = launched project bots × 100 KAS (one-time activation
+                    fee per project deployment).
+                  </p>
+                </div>
+              </Section>
+
+              <Section tone="violet" num="02" title="The Deterministic Volume Model">
+                <p>
+                  To eliminate ambiguity and ensure predictable liquidity generation, KasVolume
+                  operates on a structured, rhythmic engine.
+                </p>
+                <PaperTable
+                  tone="violet"
+                  headers={['Cycle Phase', 'Action Type', 'Amount Per Trade', 'Time Interval']}
+                  rows={CYCLE_ROWS}
+                />
+                <div className="rounded-2xl border border-fuchsia-500/20 bg-[#14081c] p-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-300">
+                    Why the 21 KAS / 6-Minute Model?
+                  </p>
+                  <p className="mt-3 text-sm leading-relaxed text-zinc-300">
+                    This rhythm prevents erratic order book distortion while maintaining a
+                    steady heartbeat of transactions every 6 minutes. The balanced 5-in / 5-out
+                    cycle with exact 21 KAS sizing establishes stable volume metrics visible on
+                    decentralized aggregators without inducing artificial downward or upward
+                    price drift.
+                  </p>
+                </div>
+              </Section>
+
+              <Section tone="violet" num="03" title="Product Architecture & Deployment">
+                <p>
+                  KasVolume delivers a streamlined deployment workflow for token projects:
+                </p>
+                <ol className="space-y-3">
+                  {VOLUME_WORKFLOW.map((step, index) => (
+                    <li
+                      key={step}
+                      className="flex gap-4 rounded-xl border border-violet-500/20 bg-violet-500/5 p-4"
+                    >
+                      <span className="font-mono text-sm font-bold text-violet-300">
+                        {String(index + 1).padStart(2, '0')}
+                      </span>
+                      <span className="text-zinc-300">{step}</span>
+                    </li>
+                  ))}
+                </ol>
+                <p className="text-sm">
+                  Protocol fee destination:{' '}
+                  <span className="mt-1 block break-all font-mono text-xs text-violet-300">
+                    {SERVICE_FEE_ADDRESS}
+                  </span>
+                </p>
+              </Section>
+
+              <Section tone="violet" num="04" title="Security & Non-Custodial Design">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {VOLUME_SECURITY.map((item) => (
+                    <div
+                      key={item.title}
+                      className="rounded-2xl border border-violet-500/20 bg-[#110818] p-5"
+                    >
+                      <h3 className="font-semibold text-white">{item.title}</h3>
+                      <p className="mt-2 text-sm leading-relaxed">{item.body}</p>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+
+              <Section tone="violet" num="05" title="Revenue Model & Projections">
+                <p>
+                  KasVolume captures protocol revenue exclusively through the one-time 100 KAS
+                  project bot activation fee.
+                </p>
+                <PaperTable
+                  tone="violet"
+                  headers={['Project Launches', 'Fee Structure', 'Billing Model', 'Total Activation Revenue']}
+                  rows={VOLUME_LAUNCH_ROWS}
+                />
+                <PaperTable
+                  tone="violet"
+                  headers={['Monthly Active Launches', 'Fee Per Launch', 'Monthly Gross Revenue (KAS)']}
+                  rows={VOLUME_MONTHLY_ROWS}
+                />
+              </Section>
+
+              <Section tone="violet" num="06" title="Strategic Roadmap">
+                <div className="grid gap-3">
+                  {VOLUME_ROADMAP.map((item) => (
+                    <div
+                      key={item.phase}
+                      className="grid grid-cols-[3.5rem_1fr] overflow-hidden rounded-2xl border border-violet-500/20 bg-violet-500/5"
+                    >
+                      <div className="flex items-center justify-center bg-violet-500/20 font-mono text-sm font-bold text-violet-200">
+                        {item.phase}
+                      </div>
+                      <div className="p-4">
+                        <h3 className="font-semibold text-white">{item.title}</h3>
+                        <p className="mt-1 text-sm leading-relaxed">{item.body}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+
+              <Section tone="violet" num="07" title="Conclusion">
+                <p>
+                  KasVolume eliminates the liquidity cold-start problem for KCC-20 tokens
+                  through a proven, deterministic model (21 KAS trades, 5-in / 5-out cycles,
+                  6-minute spacing) backed by a simple one-time 100 KAS activation fee.
+                </p>
+                <p className="text-sm text-zinc-500">
+                  This document is a technical white paper and product proposal, not financial
+                  or legal advice. Revenue illustrations are hypothetical.
+                </p>
+              </Section>
         </div>
       </article>
     </LandingLayout>
