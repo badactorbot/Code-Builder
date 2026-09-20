@@ -140,7 +140,11 @@ async function calculateConsensusMass(
           transactionId: input.transactionId,
           index: input.index,
         },
-        signatureScript: '',
+        // The transaction is unsigned at build time, but KasWare adds a
+        // 66-byte Schnorr signature script before broadcast. Consensus compute
+        // mass must model the signed transaction or the relay fee is short by
+        // exactly 66 mass units per input.
+        signatureScript: '00'.repeat(66),
         sequence: 0,
         sigOpCount: 1,
       })),
@@ -219,10 +223,15 @@ router.post('/build-pskt', async (req, res) => {
       isCoinbase: Boolean(utxo.utxoEntry.isCoinbase),
     })).filter(utxo =>
       !mempoolSpent.has(`${utxo.transactionId}:${utxo.index}`)
-      && !explicitlyExcluded.has(`${utxo.transactionId}:${utxo.index}`),
+      && !explicitlyExcluded.has(`${utxo.transactionId}:${utxo.index}`)
+      && utxo.script === senderScript,
     )
       .sort((a, b) => a.amount > b.amount ? -1 : a.amount < b.amount ? 1 : 0);
-    if (!utxos.length) return res.status(400).json({ error: 'No spendable UTXOs are available.' });
+    if (!utxos.length) {
+      return res.status(400).json({
+        error: 'No spendable UTXOs owned by the connected sender address are available.',
+      });
+    }
 
     const selected: typeof utxos = [];
     let selectedTotal = 0n;

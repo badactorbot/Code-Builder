@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { blake2b } from '@noble/hashes/blake2.js';
 import { estimateTransactionFee } from '../lib/kcc20-fee.js';
+import {
+  getCompletedKrc20Snapshot,
+  startKrc20Index,
+  BURN_ADDRESS as KRC20_BURN_ADDRESS,
+} from '../lib/krc20-indexer.js';
 
 const router = Router();
 
@@ -379,25 +384,69 @@ router.get('/token-holders/:identifier', async (req, res) => {
     )];
     const total = Number(token?.holderTotal ?? addresses.length);
 
-    if (Number.isFinite(total) && total > positiveHolderRows.length) {
+    const providerIsPartial = Number.isFinite(total) && total > positiveHolderRows.length;
+    let snapshot = {
+      addresses,
+      excludedBurnAddresses: holderRows.filter(
+        (holder: any) => holder?.address === KASPA_BURN_ADDRESS || holder?.address === KRC20_BURN_ADDRESS,
+      ).length,
+    };
+
+    if (providerIsPartial) {
+      let job;
+      try {
+        job = await startKrc20Index(ticker, total);
+      } catch (error: any) {
+        res.status(502).json({
+          error: 'Complete KRC-20 holder indexing is unavailable.',
+          detail: error?.message,
+        });
+        return;
+      }
+      if (job.status === 'failed') {
+        res.status(502).json({
+          error: `Complete KRC-20 holder indexing failed for ${ticker}.`,
+          detail: job.last_error,
+        });
+        return;
+      }
+      if (job.status !== 'completed') {
+        res.status(202).json({
+          protocol: 'KRC-20',
+          identifier: ticker,
+          error: `Kasplex exposes only its top ${addresses.length.toLocaleString()} of ${total.toLocaleString()} holders. Complete holder indexing is in progress; no partial addresses were imported.`,
+          indexing: true,
+          providerLimited: true,
+          totalHolders: total,
+          expectedHolders: total,
+          retryAfterMs: 2000,
+          processedOperations: job.processed_operations,
+          status: job.status,
+        });
+        return;
+      }
+      snapshot = await getCompletedKrc20Snapshot(ticker);
+    }
+
+    const completeAddresses = snapshot.addresses;
+    const excludedBurnAddresses = snapshot.excludedBurnAddresses;
+    if (Number.isFinite(total) && completeAddresses.length + excludedBurnAddresses !== total) {
       res.status(409).json({
-        error: `The KRC-20 indexer reports ${total.toLocaleString()} holders but only exposes its top ${addresses.length.toLocaleString()}. Import was stopped to prevent a partial distribution.`,
-        providerLimited: true,
+        error: `Complete holder index for ${ticker} resolved ${completeAddresses.length.toLocaleString()} eligible addresses and ${excludedBurnAddresses.toLocaleString()} burn holders, but Kasplex reports ${total.toLocaleString()}. Import was stopped.`,
+        indexing: true,
         totalHolders: total,
       });
       return;
     }
-
     res.json({
       protocol: 'KRC-20',
       identifier: ticker,
-      addresses,
-      imported: addresses.length,
+      addresses: completeAddresses,
+      imported: completeAddresses.length,
       hasMore: false,
       totalHolders: Number.isFinite(total) ? total : null,
-      excludedBurnAddresses: holderRows.filter(
-        (holder: any) => holder?.address === KASPA_BURN_ADDRESS,
-      ).length,
+      excludedBurnAddresses,
+    });
     });
   } catch (err: any) {
     res.status(502).json({
