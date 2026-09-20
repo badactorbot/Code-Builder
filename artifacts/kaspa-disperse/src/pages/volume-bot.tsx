@@ -41,7 +41,11 @@ export default function VolumeBot() {
 
   return (
     <LandingLayout showGrid={false}>
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+      <div className="relative min-h-[min(92dvh,1100px)] overflow-hidden bg-[#030914]">
+        <div className="absolute inset-0 z-0 pointer-events-none cyber-grid">
+          <div className="absolute top-[20%] left-1/2 h-[600px] w-[1000px] -translate-x-1/2 rounded-[100%] bg-primary/10 blur-[120px] mix-blend-screen" />
+        </div>
+        <div className="relative z-10 mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white sm:text-3xl">
@@ -91,6 +95,7 @@ export default function VolumeBot() {
             walletAddress={dashboard.walletAddress}
           />
         )}
+        </div>
       </div>
     </LandingLayout>
   );
