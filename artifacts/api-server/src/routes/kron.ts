@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { blake2b } from '@noble/hashes/blake2.js';
 import { estimateTransactionFee } from '../lib/kcc20-fee.js';
+import { inspectTestnetToken } from '../lib/distributor-poc/testnet-preflight.mjs';
 import {
   getCompletedKrc20Snapshot,
   startKrc20Index,
@@ -17,6 +18,21 @@ const KRON_API = 'https://api.kron.technology';
 const KRON_INDEXER_API = 'https://idx.kron.technology/v1/kcc20';
 const HOLDER_PAGE_LIMIT = 1000;
 const KASPA_BURN_ADDRESS = 'kaspa:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqkx9awp4e';
+
+// Research-only testnet preflight. This endpoint cannot create or send transactions.
+router.get('/testnet/inspect', async (req, res) => {
+  const address = req.query.address;
+  const ticker = req.query.ticker;
+  if (typeof address !== 'string' || !/^kaspatest:[a-z0-9]{50,110}$/.test(address) ||
+    typeof ticker !== 'string' || !/^[a-zA-Z0-9]{1,24}$/.test(ticker)) {
+    return res.status(400).json({ error: 'A testnet wallet address and token ticker are required.' });
+  }
+  try {
+    return res.json(await inspectTestnetToken(address, ticker));
+  } catch (error) {
+    return res.status(502).json({ error: error instanceof Error ? error.message : 'Testnet preflight failed.' });
+  }
+});
 
 function isEligibleHolderAddress(address: unknown): address is string {
   return typeof address === 'string'
@@ -336,10 +352,33 @@ router.get('/token-holders/:identifier', async (req, res) => {
       } while (cursor);
 
       const addresses = [...addressSet];
+      // Holder pagination contains addresses but no token identity. Resolve the
+      // ticker from metadata for clients that distribute the imported token.
+      // A metadata outage must not make the existing KAS holder import fail.
+      let ticker: string | null = null;
+      try {
+        const metadataResponse = await fetch(`${KCC20_API}/v1/tokens/${tokenId}`, {
+          headers: { Accept: 'application/json', 'User-Agent': 'kasdistro/1.0' },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (metadataResponse.ok) {
+          const metadata: any = await metadataResponse.json();
+          if (
+            metadata?.token_id?.toLowerCase() === tokenId
+            && typeof metadata.ticker === 'string'
+            && /^[a-zA-Z0-9]{1,32}$/.test(metadata.ticker)
+          ) {
+            ticker = metadata.ticker.toUpperCase();
+          }
+        }
+      } catch (error) {
+        req.log.warn({ error }, 'KCC-20 token ticker lookup unavailable');
+      }
 
       res.json({
         protocol: 'KCC-20',
         identifier: tokenId,
+        ticker,
         addresses,
         imported: addresses.length,
         hasMore: false,
@@ -446,7 +485,6 @@ router.get('/token-holders/:identifier', async (req, res) => {
       hasMore: false,
       totalHolders: Number.isFinite(total) ? total : null,
       excludedBurnAddresses,
-    });
     });
   } catch (err: any) {
     res.status(502).json({

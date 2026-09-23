@@ -13,6 +13,29 @@ tags:
   - name: bot
     description: Kron trading bot controls and monitoring
 paths:
+  /kron/testnet/inspect:
+    get:
+      operationId: inspectTestnetToken
+      tags: [health]
+      summary: Read-only testnet KCC-20 token preflight
+      parameters:
+        - in: query
+          name: address
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: ticker
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Verified public testnet token holdings and template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestnetTokenInspection"
   /healthz:
     get:
       operationId: healthCheck
@@ -341,6 +364,36 @@ paths:
                 $ref: "#/components/schemas/KasWithdrawalResult"
 components:
   schemas:
+    TestnetTokenInspection:
+      type: object
+      properties:
+        network: { type: string }
+        ticker: { type: string }
+        tokenCovenantId: { type: string }
+        tokenDecimals: { type: number }
+        utxoCount: { type: number }
+        balanceUnits: { type: string }
+        ownerMode: { type: number }
+        tokenCarrierSompi: { type: string }
+        stateStart: { type: number }
+        stateLength: { type: number }
+        templatePrefixLength: { type: number }
+        templateSuffixLength: { type: number }
+        tokenTemplateHash: { type: string }
+      required:
+        - network
+        - ticker
+        - tokenCovenantId
+        - tokenDecimals
+        - utxoCount
+        - balanceUnits
+        - ownerMode
+        - tokenCarrierSompi
+        - stateStart
+        - stateLength
+        - templatePrefixLength
+        - templateSuffixLength
+        - tokenTemplateHash
     HealthStatus:
       type: object
       properties:

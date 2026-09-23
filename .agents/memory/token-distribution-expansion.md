@@ -33,6 +33,12 @@ Complete holder import is allowed only when the indexer can enumerate every hold
 
 **How to apply:** KRC-20 uses its L1 ticker, not a `0x` address. Reject partial imports until a verified full-holder provider exists; paginate complete sources, deduplicate, and import only resolved `kaspa:` owners.
 
+On KAS DISTRO, the KCC-20 holder-source input expects a 64-character token ID, not a literal `kaspa:` covenant address.
+
+**Why:** The user explicitly chose the 64-character token ID when asked to clarify the otherwise ambiguous wording.
+
+**How to apply:** Preserve ID-based holder lookup; do not infer literal covenant-address support from informal references to a covenant address.
+
 KasDistro is strictly Kaspa Layer 1. Do not support EVM token contracts, `0x` holder addresses, or cross-layer address mapping.
 
 **Why:** Native-KAS distributions require verifiable L1 `kaspa:` recipients, and the user confirmed this is an absolute product boundary.
