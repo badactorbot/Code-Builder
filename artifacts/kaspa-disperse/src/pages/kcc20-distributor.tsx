@@ -1,16 +1,8 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { Search, Loader2, AlertCircle, Fingerprint, Coins, CheckCircle2, Layers } from 'lucide-react';
 import { Link } from 'wouter';
+import { kaspaApiBase } from '@/lib/dispenser/api';
 
-function resolveApiBase() {
-  const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '');
-  const hostname = window.location.hostname;
-  const usesSameOriginApi = hostname === 'localhost'
-    || hostname === '127.0.0.1'
-    || hostname.endsWith('.replit.app')
-    || hostname.endsWith('.replit.dev');
-  return configuredApiBase ?? (usesSameOriginApi ? '' : 'https://bushwookiekasperse.replit.app');
-}
 
 type HolderImportResult = {
   protocol: string;
@@ -109,13 +101,21 @@ export default function Kcc20Distributor() {
     abortRef.current = abortController;
 
     try {
-      const endpoint = `${resolveApiBase()}/api/kron/token-holders/${encodeURIComponent(cid)}`;
+      const endpoint = `${kaspaApiBase()}/api/kron/token-holders/${encodeURIComponent(cid)}`;
       while (true) {
-        const response = await fetch(endpoint, {
-          headers: { Accept: 'application/json' },
-          cache: 'no-store',
-          signal: abortController.signal,
-        });
+        let response: Response;
+        try {
+          response = await fetch(endpoint, {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store',
+            signal: abortController.signal,
+          });
+        } catch (cause) {
+          if (abortController.signal.aborted) throw cause;
+          throw new Error(
+            `Could not reach the holder API at ${new URL(endpoint, window.location.origin).origin}. Check your connection and try again.`,
+          );
+        }
         const bodyText = await response.text();
         let body: (HolderImportResult & { error?: unknown }) | HolderIndexingStatus;
         try {
