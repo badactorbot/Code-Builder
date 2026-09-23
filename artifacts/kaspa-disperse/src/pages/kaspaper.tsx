@@ -167,7 +167,7 @@ const VOLUME_ROADMAP = [
   },
 ];
 
-type PaperTone = 'cyan' | 'violet';
+type PaperTone = 'cyan' | 'blue';
 
 function Section({
   num,
@@ -180,7 +180,7 @@ function Section({
   children: ReactNode;
   tone?: PaperTone;
 }) {
-  const numClass = tone === 'violet' ? 'text-violet-300' : 'text-cyan-400';
+  const numClass = tone === 'blue' ? 'text-sky-300' : 'text-cyan-400';
   return (
     <section className="scroll-mt-28">
       <div className="mb-6 flex items-baseline gap-4">
@@ -202,16 +202,16 @@ function PaperTable({
   tone?: PaperTone;
 }) {
   const shell =
-    tone === 'violet'
-      ? 'border-violet-500/25'
+    tone === 'blue'
+      ? 'border-sky-400/30'
       : 'border-cyan-900/30';
   const head =
-    tone === 'violet'
-      ? 'border-b border-violet-500/25 bg-violet-500/10'
+    tone === 'blue'
+      ? 'border-b border-sky-400/30 bg-sky-500/10'
       : 'border-b border-cyan-900/30 bg-cyan-500/5';
-  const headText = tone === 'violet' ? 'text-violet-200' : 'text-cyan-300';
+  const headText = tone === 'blue' ? 'text-sky-200' : 'text-cyan-300';
   const rowBorder =
-    tone === 'violet' ? 'border-b border-violet-500/15 last:border-0' : 'border-b border-cyan-900/15 last:border-0';
+    tone === 'blue' ? 'border-b border-sky-400/15 last:border-0' : 'border-b border-cyan-900/15 last:border-0';
 
   return (
     <div className={`overflow-x-auto rounded-2xl border ${shell}`}>
@@ -259,7 +259,7 @@ export default function Kaspaper() {
         </a>
         <a
           href="#kasvolume"
-          className="rounded-full border border-violet-500/35 bg-violet-500/10 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-violet-200 hover:bg-violet-500/20"
+          className="rounded-full border border-sky-500/35 bg-sky-500/10 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-200 hover:bg-sky-500/20"
         >
           Volume Paper
         </a>
@@ -428,15 +428,15 @@ export default function Kaspaper() {
 
       <article
         id="kasvolume"
-        className="relative scroll-mt-40 border-t border-violet-500/20"
+        className="relative scroll-mt-40 border-t border-sky-500/20"
       >
         <header className="px-4 sm:px-6 pt-16 sm:pt-24 pb-14 text-center">
-          <p className="mb-5 text-xs font-semibold uppercase tracking-[0.32em] text-violet-300/90">
+          <p className="mb-5 text-xs font-semibold uppercase tracking-[0.32em] text-sky-300/90">
             KasVolume Protocol · White Paper v1.1
           </p>
           <h1 className="mx-auto max-w-3xl text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1] text-white">
             Enterprise-Grade KCC-20{' '}
-            <span className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-cyan-300 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-sky-300 via-blue-400 to-blue-200 bg-clip-text text-transparent">
               Volume Trading Bot
             </span>
           </h1>
@@ -447,7 +447,7 @@ export default function Kaspaper() {
         </header>
 
         <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 sm:py-16 space-y-20">
-              <Section tone="violet" num="01" title="Executive Summary">
+              <Section tone="blue" num="01" title="Executive Summary">
                 <p>
                   KasVolume is a specialized, automated volume-trading and market-liquidity bot
                   engineered specifically for KCC-20 tokens within the Kaspa ecosystem. It
@@ -459,10 +459,10 @@ export default function Kaspaper() {
                   {VOLUME_SPECS.map(({ icon: Icon, label, value, detail }) => (
                     <div
                       key={label}
-                      className="rounded-2xl border border-violet-500/25 bg-violet-500/10 p-5"
+                      className="rounded-2xl border border-sky-500/25 bg-sky-500/10 p-5"
                     >
-                      <Icon className="mb-3 h-5 w-5 text-violet-300" />
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-200/80">
+                      <Icon className="mb-3 h-5 w-5 text-sky-300" />
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-200/80">
                         {label}
                       </p>
                       <p className="mt-2 text-xl font-bold text-white">{value}</p>
@@ -475,26 +475,26 @@ export default function Kaspaper() {
                   exactly 100 KAS, paid directly upon setup. Once launched, the trading bot
                   operates continuously according to the deterministic cycle profile.
                 </p>
-                <div className="rounded-2xl border border-violet-400/30 bg-gradient-to-r from-violet-500/15 to-fuchsia-500/10 p-6">
-                  <p className="text-sm font-medium leading-relaxed text-violet-100">
+                <div className="rounded-2xl border border-sky-400/30 bg-gradient-to-r from-sky-500/15 to-blue-500/10 p-6">
+                  <p className="text-sm font-medium leading-relaxed text-sky-100">
                     KasVolume revenue = launched project bots × 100 KAS (one-time activation
                     fee per project deployment).
                   </p>
                 </div>
               </Section>
 
-              <Section tone="violet" num="02" title="The Deterministic Volume Model">
+              <Section tone="blue" num="02" title="The Deterministic Volume Model">
                 <p>
                   To eliminate ambiguity and ensure predictable liquidity generation, KasVolume
                   operates on a structured, rhythmic engine.
                 </p>
                 <PaperTable
-                  tone="violet"
+                  tone="blue"
                   headers={['Cycle Phase', 'Action Type', 'Amount Per Trade', 'Time Interval']}
                   rows={CYCLE_ROWS}
                 />
-                <div className="rounded-2xl border border-fuchsia-500/20 bg-[#14081c] p-6">
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-300">
+                <div className="rounded-2xl border border-sky-400/20 bg-[#06131c] p-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-300">
                     Why the 21 KAS / 6-Minute Model?
                   </p>
                   <p className="mt-3 text-sm leading-relaxed text-zinc-300">
@@ -507,7 +507,7 @@ export default function Kaspaper() {
                 </div>
               </Section>
 
-              <Section tone="violet" num="03" title="Product Architecture & Deployment">
+              <Section tone="blue" num="03" title="Product Architecture & Deployment">
                 <p>
                   KasVolume delivers a streamlined deployment workflow for token projects:
                 </p>
@@ -515,9 +515,9 @@ export default function Kaspaper() {
                   {VOLUME_WORKFLOW.map((step, index) => (
                     <li
                       key={step}
-                      className="flex gap-4 rounded-xl border border-violet-500/20 bg-violet-500/5 p-4"
+                      className="flex gap-4 rounded-xl border border-sky-500/20 bg-sky-500/5 p-4"
                     >
-                      <span className="font-mono text-sm font-bold text-violet-300">
+                      <span className="font-mono text-sm font-bold text-sky-300">
                         {String(index + 1).padStart(2, '0')}
                       </span>
                       <span className="text-zinc-300">{step}</span>
@@ -526,18 +526,18 @@ export default function Kaspaper() {
                 </ol>
                 <p className="text-sm">
                   Protocol fee destination:{' '}
-                  <span className="mt-1 block break-all font-mono text-xs text-violet-300">
+                  <span className="mt-1 block break-all font-mono text-xs text-sky-300">
                     {SERVICE_FEE_ADDRESS}
                   </span>
                 </p>
               </Section>
 
-              <Section tone="violet" num="04" title="Security & Non-Custodial Design">
+              <Section tone="blue" num="04" title="Security & Non-Custodial Design">
                 <div className="grid gap-4 sm:grid-cols-2">
                   {VOLUME_SECURITY.map((item) => (
                     <div
                       key={item.title}
-                      className="rounded-2xl border border-violet-500/20 bg-[#110818] p-5"
+                      className="rounded-2xl border border-sky-500/20 bg-[#061018] p-5"
                     >
                       <h3 className="font-semibold text-white">{item.title}</h3>
                       <p className="mt-2 text-sm leading-relaxed">{item.body}</p>
@@ -546,31 +546,31 @@ export default function Kaspaper() {
                 </div>
               </Section>
 
-              <Section tone="violet" num="05" title="Revenue Model & Projections">
+              <Section tone="blue" num="05" title="Revenue Model & Projections">
                 <p>
                   KasVolume captures protocol revenue exclusively through the one-time 100 KAS
                   project bot activation fee.
                 </p>
                 <PaperTable
-                  tone="violet"
+                  tone="blue"
                   headers={['Project Launches', 'Fee Structure', 'Billing Model', 'Total Activation Revenue']}
                   rows={VOLUME_LAUNCH_ROWS}
                 />
                 <PaperTable
-                  tone="violet"
+                  tone="blue"
                   headers={['Monthly Active Launches', 'Fee Per Launch', 'Monthly Gross Revenue (KAS)']}
                   rows={VOLUME_MONTHLY_ROWS}
                 />
               </Section>
 
-              <Section tone="violet" num="06" title="Strategic Roadmap">
+              <Section tone="blue" num="06" title="Strategic Roadmap">
                 <div className="grid gap-3">
                   {VOLUME_ROADMAP.map((item) => (
                     <div
                       key={item.phase}
-                      className="grid grid-cols-[3.5rem_1fr] overflow-hidden rounded-2xl border border-violet-500/20 bg-violet-500/5"
+                      className="grid grid-cols-[3.5rem_1fr] overflow-hidden rounded-2xl border border-sky-500/20 bg-sky-500/5"
                     >
-                      <div className="flex items-center justify-center bg-violet-500/20 font-mono text-sm font-bold text-violet-200">
+                      <div className="flex items-center justify-center bg-sky-500/20 font-mono text-sm font-bold text-sky-200">
                         {item.phase}
                       </div>
                       <div className="p-4">
@@ -582,7 +582,7 @@ export default function Kaspaper() {
                 </div>
               </Section>
 
-              <Section tone="violet" num="07" title="Conclusion">
+              <Section tone="blue" num="07" title="Conclusion">
                 <p>
                   KasVolume eliminates the liquidity cold-start problem for KCC-20 tokens
                   through a proven, deterministic model (21 KAS trades, 5-in / 5-out cycles,
